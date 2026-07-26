@@ -34,11 +34,13 @@ export class PlaybackLoop {
   private refreshTask: Promise<void> | null = null;
   private taskController = new PlaybackLoopTaskController();
   private revision = 0;
+  private active = false;
 
   constructor(private readonly args: PlaybackLoopArgs) {}
 
   start(): void {
     this.stop();
+    this.active = true;
     const revision = this.revision;
     this.fillTimer = setInterval(() => this.requestFill(revision), this.args.policy.pollIntervalMs);
     this.manifestTimer = setInterval(
@@ -48,6 +50,7 @@ export class PlaybackLoop {
   }
 
   stop(): void {
+    this.active = false;
     this.revision += 1;
     this.taskController.stop();
     if (this.fillTimer) clearInterval(this.fillTimer);
@@ -67,6 +70,7 @@ export class PlaybackLoop {
   }
 
   wake(): void {
+    if (!this.active) return;
     this.requestFill(this.revision);
   }
 
