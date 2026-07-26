@@ -31,6 +31,7 @@ export class MediaSourceController {
   private audioMime: string | null = null;
   private videoMime: string | null = null;
   private remotePlaybackPreference: boolean | null = null;
+  private freshAttachmentRequired = false;
 
   constructor(
     private readonly video: HTMLVideoElement,
@@ -45,13 +46,18 @@ export class MediaSourceController {
   }
 
   async attach(manifest: PlaybackManifest): Promise<void> {
-    const mediaSource = this.reusableMediaSource();
+    const mediaSource = this.freshAttachmentRequired ? null : this.reusableMediaSource();
+    this.freshAttachmentRequired = false;
     if (mediaSource && this.hasCompatibleLayout(manifest)) {
       await this.resetSourceBuffers(mediaSource, manifest);
       return;
     }
     this.detach();
     await this.attachNewMediaSource(manifest);
+  }
+
+  requireFreshAttachment(): void {
+    this.freshAttachmentRequired = true;
   }
 
   private async attachNewMediaSource(manifest: PlaybackManifest): Promise<void> {

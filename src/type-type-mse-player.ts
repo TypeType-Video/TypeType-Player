@@ -3,7 +3,7 @@ import { decodeStartMs, runDecodePreroll } from "./decode-preroll";
 import { EventEmitter } from "./event-emitter";
 import { LiveEdgeFollower } from "./live-edge-follower";
 import { skipBufferedLiveGap } from "./live-media-gap";
-import { seekWithinBufferedMedia } from "./media-buffer";
+import { canSeekWithinBufferedMedia } from "./media-buffer";
 import { tryResumePlayback } from "./media-playback";
 import { PlaybackIntent } from "./playback-intent";
 import {
@@ -73,7 +73,12 @@ import type {
       session: () => this.session,
       signal: () => this.operation.signal,
       state: (state) => this.playerState.set(state),
-      error: (error) => this.reportPlaybackFailure(error),
+      error: (error) => {
+        if (this.bufferedSeekRecovery.handleDecoderError(error)) return true;
+        this.bufferedSeekRecovery.cancel();
+        this.reportPlaybackFailure(error);
+        return false;
+      },
       progress: (positionMs) => {
         this.rememberRecoveryPosition(positionMs);
         this.playbackRecovery.observeProgress(positionMs);
@@ -171,15 +176,36 @@ import type {
       this.session &&
       this.playerState.value !== "loading" &&
       this.playerState.value !== "seeking" &&
-      seekWithinBufferedMedia(this.video, targetMs)
+      canSeekWithinBufferedMedia(this.video, targetMs)
     ) {
+      const completion = this.bufferedSeekRecovery.arm(
+        this.video,
+        targetMs,
+        () => {
+          this.rememberRecoveryPosition(currentTimeMs(this.video));
+          this.deps.loop.wake();
+        },
+        (fallbackTargetMs, freshMediaSource) => {
+          const restoreMediaState = freshMediaSource ? this.transientMediaState.preserve() : null;
+          if (freshMediaSource) this.deps.media.requireFreshAttachment();
+          const fallback = this.seekController.seek(
+            fallbackTargetMs,
+            `buffered-recovery:${fallbackTargetMs}`,
+            (target) => this.performSeek(target),
+            () => this.operation.abort(),
+          );
+          return restoreMediaState ? fallback.finally(restoreMediaState) : fallback;
+        },
+      );
+      try {
+        this.video.currentTime = targetMs / 1000;
+      } catch (error) {
+        this.bufferedSeekRecovery.cancel();
+        throw error;
+      }
       this.emitter.emit({ type: "seek", positionMs: targetMs });
       this.deps.loop.wake();
-      this.bufferedSeekRecovery.arm(this.video, targetMs, () => {
-        this.rememberRecoveryPosition(currentTimeMs(this.video));
-        this.deps.loop.wake();
-      });
-      return;
+      return completion;
     }
     return this.seekController.seek(
       targetMs,
@@ -269,7 +295,11 @@ import type {
     const revision = this.operation.next();
     const signal = this.operation.signal;
     const targetMs = Math.max(0, Math.round(positionMs));
-    if (!quality) this.deps.loop.stop();
+    if (!quality) {
+      this.deps.loop.stop();
+      await this.deps.loop.quiesce();
+      this.operation.ensureCurrent(this.destroyed, revision);
+    }
     this.playerState.set("seeking");
     this.emitter.emit({ type: "seek", positionMs: targetMs });
     try {

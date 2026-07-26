@@ -12,11 +12,18 @@ export function seekWithinBufferedMedia(
   video: Pick<HTMLVideoElement, "buffered" | "currentTime">,
   targetMs: number,
 ): boolean {
+  if (!canSeekWithinBufferedMedia(video, targetMs)) return false;
+  video.currentTime = Math.max(0, Math.round(targetMs)) / 1000;
+  return true;
+}
+
+export function canSeekWithinBufferedMedia(
+  video: Pick<HTMLVideoElement, "buffered">,
+  targetMs: number,
+): boolean {
   const safeTargetMs = Math.max(0, Math.round(targetMs));
   const range = bufferedRangeAt(video.buffered, safeTargetMs / 1000);
-  if (!range || safeTargetMs > range.end * 1000 - MIN_SEEK_BUFFER_MS) return false;
-  video.currentTime = safeTargetMs / 1000;
-  return true;
+  return range !== null && safeTargetMs <= range.end * 1000 - MIN_SEEK_BUFFER_MS;
 }
 
 export function bufferedRangeAt(ranges: TimeRanges, positionSeconds: number) {

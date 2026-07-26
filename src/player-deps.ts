@@ -28,7 +28,7 @@ type Args = {
   session: () => LoadedSession | null;
   signal: () => AbortSignal;
   state: (state: TypeTypeMseState) => void;
-  error: (error: Error) => void;
+  error: (error: Error) => boolean;
   progress: (positionMs: number) => void;
   loopError: (error: Error, context: PlaybackLoopFailureContext) => void;
 };

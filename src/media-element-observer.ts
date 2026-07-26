@@ -1,9 +1,15 @@
 import type { TypeTypeMseState } from "./types";
 
+export class MediaElementPlaybackError extends Error {
+  constructor(readonly code: number) {
+    super(`Media element failed with code ${code}`);
+  }
+}
+
 type MediaElementObserverArgs = {
   video: HTMLVideoElement;
   state: (state: TypeTypeMseState) => void;
-  error: (error: Error) => void;
+  error: (error: Error) => boolean;
   progress: (positionMs: number) => void;
 };
 
@@ -15,7 +21,7 @@ export class MediaElementObserver {
     this.args.video.addEventListener("waiting", this.buffering);
     this.args.video.addEventListener("stalled", this.buffering);
     this.args.video.addEventListener("ended", this.ended);
-    this.args.video.addEventListener("error", this.error);
+    this.args.video.addEventListener("error", this.error, true);
     this.args.video.addEventListener("timeupdate", this.progress);
   }
 
@@ -24,7 +30,7 @@ export class MediaElementObserver {
     this.args.video.removeEventListener("waiting", this.buffering);
     this.args.video.removeEventListener("stalled", this.buffering);
     this.args.video.removeEventListener("ended", this.ended);
-    this.args.video.removeEventListener("error", this.error);
+    this.args.video.removeEventListener("error", this.error, true);
     this.args.video.removeEventListener("timeupdate", this.progress);
   }
 
@@ -34,9 +40,11 @@ export class MediaElementObserver {
 
   private readonly ended = (): void => this.args.state("ended");
 
-  private readonly error = (): void => {
+  private readonly error = (event: Event): void => {
     const code = this.args.video.error?.code ?? 0;
-    this.args.error(new Error(`Media element failed with code ${code}`));
+    if (this.args.error(new MediaElementPlaybackError(code))) {
+      event.stopImmediatePropagation();
+    }
   };
 
   private readonly progress = (): void => {
