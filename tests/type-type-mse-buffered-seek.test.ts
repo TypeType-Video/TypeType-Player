@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { BufferedSeekRecovery } from "../src/buffered-seek-recovery";
 import { LiveEdgeFollower } from "../src/live-edge-follower";
 import { PlaybackIntent } from "../src/playback-intent";
 import type { LoadedSession } from "../src/session-loader";
@@ -9,6 +10,7 @@ type BufferedSeekHarness = {
   session: LoadedSession;
   recoveryPositionMs: number;
   playbackIntent: PlaybackIntent;
+  bufferedSeekRecovery: BufferedSeekRecovery;
   liveEdgeFollower: LiveEdgeFollower;
   video: HTMLVideoElement;
   playerState: { value: TypeTypeMseState };
@@ -70,6 +72,7 @@ function harness(
   player.session = session();
   player.recoveryPositionMs = 0;
   player.playbackIntent = new PlaybackIntent();
+  player.bufferedSeekRecovery = new BufferedSeekRecovery(() => () => undefined);
   player.liveEdgeFollower = new LiveEdgeFollower(false);
   player.video = media([[0, 30]], 5);
   player.playerState = { value: "playing" };
@@ -80,15 +83,16 @@ function harness(
 }
 
 function media(ranges: Array<[number, number]>, currentTime: number): HTMLVideoElement {
-  return {
+  return Object.assign(new EventTarget(), {
     currentTime,
     paused: false,
+    seeking: true,
     buffered: {
       length: ranges.length,
       start: (index: number) => ranges[index]?.[0] ?? 0,
       end: (index: number) => ranges[index]?.[1] ?? 0,
     },
-  } as HTMLVideoElement;
+  }) as HTMLVideoElement;
 }
 
 function session(): LoadedSession {
