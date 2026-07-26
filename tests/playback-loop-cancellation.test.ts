@@ -65,9 +65,19 @@ test("quiesce aborts active loop I O and allows the replacement fill", async () 
   expect(seenSignals[0]?.aborted).toBe(true);
   expect(await staleFill).toBeInstanceOf(DOMException);
 
+  loop.wake();
+  await Bun.sleep(0);
+  expect(calls).toBe(1);
+
   await loop.fillOnce();
   expect(calls).toBe(2);
   expect(seenSignals[1]?.aborted).toBe(false);
+
+  loop.start();
+  loop.wake();
+  await Bun.sleep(0);
+  loop.stop();
+  expect(calls).toBe(3);
 });
 
 const session: LoadedSession = {
