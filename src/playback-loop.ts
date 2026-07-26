@@ -144,7 +144,7 @@ export class PlaybackLoop {
       this.args.media,
       session,
       this.args.policy,
-      currentTimeMs(this.args.video),
+      () => currentTimeMs(this.args.video),
       signal,
     );
     this.ensureCurrent(revision, signal);

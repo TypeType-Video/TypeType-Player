@@ -98,14 +98,11 @@ export async function refreshPlaybackWindow(
     Partial<Pick<MediaSourceController, "updateTiming">>,
   session: LoadedSession,
   policy: BufferPolicy,
-  playerTimeMs: number,
+  playerTimeMs: () => number,
   signal: AbortSignal,
 ): Promise<void> {
-  const request = playbackWindowRequest({ ...session, media, policy }, playerTimeMs);
-  const window = await pollSegments(
-    { playback, policy, signal },
-    session.response.sessionId,
-    request,
+  const window = await pollSegments({ playback, policy, signal }, session.response.sessionId, () =>
+    playbackWindowRequest({ ...session, media, policy }, playerTimeMs()),
   );
   if (!window?.manifest) return;
   ensureNotAborted(signal);
@@ -113,7 +110,7 @@ export async function refreshPlaybackWindow(
     window.startTimeMs ??
     window.manifest.startTimeMs ??
     session.response.startTimeMs ??
-    playerTimeMs;
+    playerTimeMs();
   const live = window.live ?? window.manifest.live ?? session.response.live ?? null;
   session.response = { ...session.response, generation: window.generation, startTimeMs, live };
   session.manifest = { ...window.manifest, startTimeMs, live };
@@ -153,27 +150,27 @@ async function waitForWindow(
   sessionId: string,
   request: PlaybackWindowRequest,
 ) {
-  return pollSegments(args, sessionId, request);
+  return pollSegments(args, sessionId, () => request);
 }
 
 async function pollSegments(
   args: Pick<LoadSessionArgs, "playback" | "policy" | "signal">,
   sessionId: string,
-  request: PlaybackWindowRequest,
+  request: () => PlaybackWindowRequest,
 ) {
-  handleWindow(await args.playback.position(sessionId, request, args.signal));
+  handleWindow(await args.playback.position(sessionId, request(), args.signal));
   let previousEdgeMs: number | null = null;
   let stagnantAttempts = 0;
   for (let attempt = 0; attempt < args.policy.manifestPollLimit; attempt += 1) {
     if (args.signal.aborted) throw new DOMException("Operation aborted", "AbortError");
-    const prefetch = handleWindow(await args.playback.prefetch(sessionId, request, args.signal));
+    const prefetch = handleWindow(await args.playback.prefetch(sessionId, request(), args.signal));
     if (!prefetch.ready) {
       stagnantAttempts = prefetch.bufferedEdgeMs === previousEdgeMs ? stagnantAttempts + 1 : 0;
       previousEdgeMs = prefetch.bufferedEdgeMs;
       await retryDelay(prefetch.retryAfterMs, stagnantAttempts, args.signal);
       continue;
     }
-    const window = handleWindow(await args.playback.segments(sessionId, request, args.signal));
+    const window = handleWindow(await args.playback.segments(sessionId, request(), args.signal));
     if (window.ready && window.manifest) return window;
     stagnantAttempts = window.bufferedEdgeMs === previousEdgeMs ? stagnantAttempts + 1 : 0;
     previousEdgeMs = window.bufferedEdgeMs;
