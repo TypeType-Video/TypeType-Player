@@ -20,7 +20,7 @@ type QualityHarness = {
   video: { currentTime: number; paused: boolean };
   playerState: { value: TypeTypeMseState; set: (state: TypeTypeMseState) => void };
   deps: {
-    loop: { stop: () => void; start: () => void };
+    loop: { stop: () => void; start: () => void; quiesce: () => Promise<void> };
     playback: {
       seek: (
         sessionId: string,
@@ -59,15 +59,21 @@ test("keeps the active playback loop running while a quality session is prepared
 });
 
 test("stops the active playback loop before a timeline seek", async () => {
-  let stops = 0;
+  const events: string[] = [];
   const player = harness(
-    async () => response(),
-    () => (stops += 1),
+    async () => {
+      events.push("seek");
+      return response();
+    },
+    () => events.push("stop"),
+    async () => {
+      events.push("quiesce");
+    },
   );
 
   await player.performSeek(120_000);
 
-  expect(stops).toBe(1);
+  expect(events).toEqual(["stop", "quiesce", "seek"]);
 });
 
 test("aborts an obsolete quality preparation and applies only the latest selection", async () => {
@@ -104,6 +110,7 @@ test("aborts an obsolete quality preparation and applies only the latest selecti
 function harness(
   seek: QualityHarness["deps"]["playback"]["seek"],
   stop: () => void,
+  quiesce: () => Promise<void> = async () => undefined,
 ): QualityHarness {
   const player = Object.create(TypeTypeMsePlayer.prototype) as QualityHarness;
   player.destroyed = false;
@@ -118,7 +125,10 @@ function harness(
     value: "playing",
     set: (state) => (player.playerState.value = state),
   };
-  player.deps = { loop: { stop, start: () => undefined }, playback: { seek } };
+  player.deps = {
+    loop: { stop, start: () => undefined, quiesce },
+    playback: { seek },
+  };
   player.emitter = { emit: () => undefined };
   player.resetPlaybackRecovery = () => undefined;
   player.switchSession = async () => player.session;

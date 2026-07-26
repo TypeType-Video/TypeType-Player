@@ -89,6 +89,35 @@ test("attach reuses source buffers when the track layout is compatible", async (
   expect(mediaSource.sourceBuffers).toEqual(firstBuffers);
 });
 
+test("a decoder recovery replaces an otherwise reusable media source", async () => {
+  const current = new FakeMediaSource();
+  current.addSourceBuffer();
+  current.addSourceBuffer();
+  const replacement = new FakeMediaSource("closed");
+  const { video } = videoElement("blob:stable");
+  const controller = new MediaSourceController(video, {
+    create: () => {
+      queueMicrotask(() => replacement.open());
+      return { managed: false, mediaSource: replacement as unknown as MediaSource };
+    },
+    createObjectUrl: () => "blob:fresh",
+    revokeObjectUrl: () => undefined,
+  });
+  const state = controller as unknown as ControllerState;
+  Object.assign(state, {
+    objectUrl: "blob:stable",
+    mediaSource: current as unknown as MediaSource,
+    audioMime: manifest(true).audio.mime,
+    videoMime: manifest(true).video?.mime ?? null,
+  });
+
+  controller.requireFreshAttachment();
+  await controller.attach(manifest(true));
+
+  expect(current.removed).toHaveLength(2);
+  expect(video.src).toBe("blob:fresh");
+});
+
 test("attach releases each old layout before repeated track changes", async () => {
   const current = new FakeMediaSource();
   current.addSourceBuffer();

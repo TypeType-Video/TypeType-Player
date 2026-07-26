@@ -37,7 +37,10 @@ test("uses existing MSE media for buffered seeks without replacing the SABR sess
     },
   );
 
-  await player.seek(20_000);
+  const transition = player.seek(20_000);
+  player.video.seeking = false;
+  player.video.dispatchEvent(new Event("seeked"));
+  await transition;
 
   expect(player.video.currentTime).toBe(20);
   expect(player.recoveryPositionMs).toBe(20_000);
@@ -72,7 +75,15 @@ function harness(
   player.session = session();
   player.recoveryPositionMs = 0;
   player.playbackIntent = new PlaybackIntent();
-  player.bufferedSeekRecovery = new BufferedSeekRecovery(() => () => undefined);
+  player.bufferedSeekRecovery = new BufferedSeekRecovery((callback) => {
+    let active = true;
+    queueMicrotask(() => {
+      if (active) callback();
+    });
+    return () => {
+      active = false;
+    };
+  });
   player.liveEdgeFollower = new LiveEdgeFollower(false);
   player.video = media([[0, 30]], 5);
   player.playerState = { value: "playing" };

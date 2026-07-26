@@ -18,6 +18,22 @@ test("restores the media element after a temporary override", () => {
   expect(video.autoplay).toBe(false);
 });
 
+test("preserves media preferences across a source replacement", () => {
+  const video = videoElement();
+  video.playbackRate = 4;
+  const state = new TransientMediaState(video);
+
+  const restore = state.preserve();
+  video.muted = true;
+  video.playbackRate = video.defaultPlaybackRate;
+  expect(video.playbackRate).toBe(4);
+  restore();
+
+  expect(video.muted).toBe(false);
+  expect(video.defaultPlaybackRate).toBe(1);
+  expect(video.playbackRate).toBe(4);
+});
+
 test("an obsolete owner cannot restore a newer override", () => {
   const video = videoElement();
   const state = new TransientMediaState(video);
@@ -70,6 +86,7 @@ test("removed lifecycle observers no longer restore state", () => {
 function videoElement(): HTMLVideoElement {
   return {
     autoplay: false,
+    defaultPlaybackRate: 1,
     muted: false,
     playbackRate: 1.25,
   } as HTMLVideoElement;
