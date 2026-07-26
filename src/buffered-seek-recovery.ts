@@ -23,7 +23,7 @@ type PendingSeek = {
 };
 
 export class BufferedSeekRecovery {
-  private cancelNudgeTimer: (() => void) | null = null;
+  private cancelNudgeTask: (() => void) | null = null;
   private cancelFallbackTimer: (() => void) | null = null;
   private cancelStableTimer: (() => void) | null = null;
   private decoderRecovery: Promise<void> | null = null;
@@ -55,7 +55,8 @@ export class BufferedSeekRecovery {
     });
     const onSeeked = () => {
       if (media.seeking) return;
-      this.cancelNudge();
+      this.cancelNudgeTimer();
+      this.detachSeekListener();
       this.cancelFallbackTimer?.();
       this.cancelFallbackTimer = null;
       this.cancelStableTimer = this.schedule(() => this.completeLocalSeek(), SEEKED_STABILITY_MS);
@@ -63,8 +64,8 @@ export class BufferedSeekRecovery {
     this.media = media;
     this.onSeeked = onSeeked;
     media.addEventListener("seeked", onSeeked);
-    this.cancelNudgeTimer = this.schedule(() => {
-      this.cancelNudge();
+    this.cancelNudgeTask = this.schedule(() => {
+      this.cancelNudgeTimer();
       if (nudgeStalledBufferedSeek(media, targetMs)) recovered();
     }, RECOVERY_DELAY_MS);
     this.cancelFallbackTimer = this.schedule(() => {
@@ -117,16 +118,20 @@ export class BufferedSeekRecovery {
   }
 
   private clearArmedSeek(): void {
-    this.cancelNudge();
+    this.cancelNudgeTimer();
+    this.detachSeekListener();
     this.cancelFallbackTimer?.();
     this.cancelFallbackTimer = null;
     this.cancelStableTimer?.();
     this.cancelStableTimer = null;
   }
 
-  private cancelNudge(): void {
-    this.cancelNudgeTimer?.();
-    this.cancelNudgeTimer = null;
+  private cancelNudgeTimer(): void {
+    this.cancelNudgeTask?.();
+    this.cancelNudgeTask = null;
+  }
+
+  private detachSeekListener(): void {
     if (this.media && this.onSeeked) {
       this.media.removeEventListener("seeked", this.onSeeked);
     }
