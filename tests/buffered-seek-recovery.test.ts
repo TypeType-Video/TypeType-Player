@@ -49,6 +49,46 @@ test("completes after the browser keeps the buffered seek stable", async () => {
   expect(media.currentTime).toBe(35.1);
 });
 
+test("keeps observing seek completion after a stalled seek nudge", async () => {
+  const scheduled: Array<{ delayMs: number; run: () => void }> = [];
+  let nudges = 0;
+  let fallbacks = 0;
+  const media = seekMedia(true, 35.1, [[7.92, 59]]);
+  const recovery = new BufferedSeekRecovery((callback, delayMs) => {
+    let active = true;
+    scheduled.push({
+      delayMs,
+      run: () => {
+        if (active) callback();
+      },
+    });
+    return () => {
+      active = false;
+    };
+  });
+
+  const completion = recovery.arm(
+    media,
+    35_100,
+    () => {
+      nudges += 1;
+    },
+    async () => {
+      fallbacks += 1;
+    },
+  );
+  scheduled.find((task) => task.delayMs === 500)?.run();
+  media.seeking = false;
+  media.dispatchEvent(new Event("seeked"));
+  scheduled.find((task) => task.delayMs === 100)?.run();
+  await completion;
+  scheduled.find((task) => task.delayMs === 1_500)?.run();
+
+  expect(nudges).toBe(1);
+  expect(fallbacks).toBe(0);
+  expect(media.currentTime).toBe(35.2);
+});
+
 test("recovers one decoder failure after a completed buffered seek", async () => {
   let release = () => undefined;
   const pending = new Promise<void>((resolve) => {
