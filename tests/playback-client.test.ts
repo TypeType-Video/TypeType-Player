@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import type { HttpClient } from "../src/http-client";
+import { type HttpClient, TypeTypeHttpError } from "../src/http-client";
 import { PlaybackClient } from "../src/playback-client";
+import { PlaybackWindowRecoveryError } from "../src/playback-window-error";
 
 test("creates live playback sessions and parses live timing", async () => {
   const requests: Array<{ path: string; init?: RequestInit }> = [];
@@ -51,3 +52,50 @@ test("creates live playback sessions and parses live timing", async () => {
   expect(response.startTimeMs).toBe(3_590_000);
   expect(response.live).toMatchObject({ active: true, headSequence: 720 });
 });
+
+test("turns an expired playback window into fresh session recovery", async () => {
+  const http = {
+    json: async () => {
+      throw new TypeTypeHttpError("Not Found", 404);
+    },
+    absolute: (path: string) => `https://beta.typetype.video/api${path}`,
+  } as unknown as HttpClient;
+
+  const request = new PlaybackClient(http).position("expired", playbackWindowRequest());
+  const error = await request.catch((reason: unknown) => reason);
+
+  expect(error).toBeInstanceOf(PlaybackWindowRecoveryError);
+  expect(error).toMatchObject({
+    message: "Playback session expired",
+    recoveryAction: "retry_fresh_session",
+  });
+});
+
+test("does not mask unrelated playback window failures", async () => {
+  const http = {
+    json: async () => {
+      throw new TypeTypeHttpError("Unauthorized", 401);
+    },
+    absolute: (path: string) => `https://beta.typetype.video/api${path}`,
+  } as unknown as HttpClient;
+
+  const request = new PlaybackClient(http).position("unauthorized", playbackWindowRequest());
+  const error = await request.catch((reason: unknown) => reason);
+
+  expect(error).toBeInstanceOf(TypeTypeHttpError);
+  expect(error).toMatchObject({ status: 401 });
+});
+
+function playbackWindowRequest() {
+  return {
+    generation: 0,
+    playerTimeMs: 420_000,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+    bufferGoalMs: 30_000,
+    backBufferMs: 10_000,
+    bufferedRanges: [],
+  };
+}

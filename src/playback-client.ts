@@ -1,4 +1,4 @@
-import type { HttpClient } from "./http-client";
+import { type HttpClient, TypeTypeHttpError } from "./http-client";
 import type { LivePlaybackWindow } from "./manifest";
 import {
   type PlaybackWindow,
@@ -6,6 +6,10 @@ import {
   parseLivePlaybackWindow,
   parsePlaybackWindow,
 } from "./playback-window";
+import {
+  isPlaybackSessionExpiryStatus,
+  playbackSessionExpiredError,
+} from "./playback-window-error";
 
 export type PlaybackResponse = {
   sessionId: string;
@@ -154,7 +158,14 @@ export class PlaybackClient {
       headers: { "content-type": "application/json" },
       body: JSON.stringify(request),
     } satisfies RequestInit;
-    const response = await this.http.json(path, signal ? { ...init, signal } : init);
-    return parsePlaybackWindow(response, this.http.absolute(path));
+    try {
+      const response = await this.http.json(path, signal ? { ...init, signal } : init);
+      return parsePlaybackWindow(response, this.http.absolute(path));
+    } catch (error) {
+      if (error instanceof TypeTypeHttpError && isPlaybackSessionExpiryStatus(error.status)) {
+        throw playbackSessionExpiredError();
+      }
+      throw error;
+    }
   }
 }

@@ -1,4 +1,8 @@
 import type { HttpClient } from "./http-client";
+import {
+  isPlaybackSessionExpiryStatus,
+  playbackSessionExpiredError,
+} from "./playback-window-error";
 
 export async function fetchSegmentBytes(
   http: HttpClient,
@@ -10,6 +14,7 @@ export async function fetchSegmentBytes(
     if (signal?.aborted) throw new DOMException("Operation aborted", "AbortError");
     const response = await http.response(url, signal ? { signal } : undefined);
     if (response.status === 200) return response.arrayBuffer();
+    if (isPlaybackSessionExpiryStatus(response.status)) throw playbackSessionExpiredError();
     if (response.status !== 202) throw new Error(`Segment failed with ${response.status}`);
     const delayMs = await retryAfterMs(response);
     await new Promise((resolve) => setTimeout(resolve, delayMs));

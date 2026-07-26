@@ -2,8 +2,15 @@ import type { BufferPolicy } from "./buffer-policy";
 import type { PlaybackManifest } from "./manifest";
 import { type MediaBufferedRange, MediaSourceController } from "./media-source-controller";
 import type { PlaybackClient, PlaybackResponse } from "./playback-client";
-import type { PlaybackWindowRecoveryAction, PlaybackWindowRequest } from "./playback-window";
+import type { PlaybackWindowRequest } from "./playback-window";
+import {
+  PlaybackWindowRecoveryError,
+  PlaybackWindowTerminalError,
+  PlaybackWindowTimeoutError,
+} from "./playback-window-error";
 import type { SegmentScheduler } from "./segment-scheduler";
+
+export { PlaybackWindowRecoveryError } from "./playback-window-error";
 
 export type LoadedSession = {
   response: PlaybackResponse;
@@ -36,31 +43,6 @@ type PlaybackWindowRequestArgs = Pick<
 > & {
   media: Pick<MediaSourceController, "bufferedRanges">;
 };
-
-class PlaybackWindowTerminalError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PlaybackWindowTerminalError";
-  }
-}
-
-export class PlaybackWindowRecoveryError extends PlaybackWindowTerminalError {
-  constructor(
-    message: string,
-    readonly recoveryAction: PlaybackWindowRecoveryAction,
-    readonly retryVideoItags: number[],
-  ) {
-    super(message);
-    this.name = "PlaybackWindowRecoveryError";
-  }
-}
-
-class PlaybackWindowTimeoutError extends Error {
-  constructor() {
-    super("Playback window was not ready in time");
-    this.name = "PlaybackWindowTimeoutError";
-  }
-}
 
 export async function loadPlaybackSession(args: LoadSessionArgs): Promise<LoadedSession> {
   const startTimeMs = args.response.startTimeMs ?? args.startTimeMs;
