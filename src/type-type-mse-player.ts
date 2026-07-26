@@ -1,7 +1,10 @@
+import { BufferedSeekRecovery } from "./buffered-seek-recovery";
 import { decodeStartMs, runDecodePreroll } from "./decode-preroll";
 import { EventEmitter } from "./event-emitter";
 import { LiveEdgeFollower } from "./live-edge-follower";
+import { skipBufferedLiveGap } from "./live-media-gap";
 import { seekWithinBufferedMedia } from "./media-buffer";
+import { tryResumePlayback } from "./media-playback";
 import { PlaybackIntent } from "./playback-intent";
 import {
   browserPlaybackLifecycleTargets,
@@ -34,6 +37,7 @@ import type {
   private readonly seekController = new SeekController();
   private readonly operation = new PlayerOperation();
   private readonly playbackRecovery = new PlaybackRecovery();
+  private readonly bufferedSeekRecovery = new BufferedSeekRecovery();
   private readonly transientMediaState: TransientMediaState;
   private readonly stopPageSuspensionObserver: () => void;
   private readonly stopPlaybackLifecycleObserver: () => void;
@@ -42,9 +46,11 @@ import type {
   private pendingPrerollTargetMs: number | null = null;
   private loadTask: Promise<void> | null = null;
   private liveEdgeCatchUpTask: Promise<void> | null = null;
+  private lifecycleResumeTask: Promise<void> | null = null;
   private sessionTransition: Promise<void> = Promise.resolve();
   private audioOnly: boolean;
   private recoveryPositionMs: number;
+  private playbackLifecycleActive = true;
   private destroyed = false;
 
   /** Creates a player without starting network or media operations. */ constructor(
@@ -75,8 +81,18 @@ import type {
       },
       loopError: (error, context) => this.handlePlaybackLoopError(error, context),
     });
+    if (config.isLive) {
+      this.emitter.on("segment", () => {
+        if (!skipBufferedLiveGap(this.video)) return;
+        this.rememberRecoveryPosition(currentTimeMs(this.video));
+        this.deps.loop.wake();
+      });
+    }
     this.stopPlaybackLifecycleObserver = observePlaybackLifecycle(
-      () => this.deps.loop.wake(),
+      {
+        active: (active) => this.syncPlaybackLifecycle(active),
+        wake: () => this.deps.loop.wake(),
+      },
       browserPlaybackLifecycleTargets(video),
     );
     this.deps.mediaEvents.start();
@@ -146,6 +162,7 @@ import type {
   }
   /** Seeks to a millisecond position without replacing the media element. */
   async seek(positionMs: number): Promise<void> {
+    this.bufferedSeekRecovery.cancel();
     this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
     const targetMs = Math.max(0, Math.round(positionMs));
     this.liveEdgeFollower.observeUserSeek(targetMs, this.session?.manifest.live);
@@ -158,6 +175,10 @@ import type {
     ) {
       this.emitter.emit({ type: "seek", positionMs: targetMs });
       this.deps.loop.wake();
+      this.bufferedSeekRecovery.arm(this.video, targetMs, () => {
+        this.rememberRecoveryPosition(currentTimeMs(this.video));
+        this.deps.loop.wake();
+      });
       return;
     }
     return this.seekController.seek(
@@ -226,6 +247,7 @@ import type {
     this.transientMediaState.restore();
     this.stopPageSuspensionObserver();
     this.stopPlaybackLifecycleObserver();
+    this.bufferedSeekRecovery.cancel();
     this.seekController.reset();
     this.pendingPrerollTargetMs = null;
     this.deps.destroy();
@@ -240,6 +262,7 @@ import type {
     audioOnly = this.audioOnly,
   ): Promise<void> {
     ensurePlayerAlive(this.destroyed);
+    this.bufferedSeekRecovery.cancel();
     const current = this.session;
     if (!current) throw new Error("Player is not loaded");
     this.resetPlaybackRecovery();
@@ -357,7 +380,7 @@ import type {
       if (resolvedStartTimeMs > 0) {
         await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
       }
-      await this.video.play();
+      await tryResumePlayback(this.video);
     } else if (finalizePausedSeek && resolvedStartTimeMs > 0) {
       await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
       this.pendingPrerollTargetMs = null;
@@ -367,7 +390,7 @@ import type {
     this.operation.ensureCurrent(this.destroyed, revision);
     this.playbackRecovery.complete(currentTimeMs(this.video));
     this.liveEdgeFollower.initialize(currentTimeMs(this.video), session.manifest.live);
-    this.deps.loop.start();
+    if (this.playbackLifecycleActive) this.deps.loop.start();
     emitManifest(this.emitter, session.response, session);
     this.playerState.set(this.video.paused ? "ready" : "playing");
     return session;
@@ -411,7 +434,6 @@ import type {
     const revision = this.operation.next();
     const signal = this.operation.signal;
     this.deps.loop.stop();
-    this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
     this.playerState.set("buffering");
     void recoverPlaybackSession({
       recovery: this.playbackRecovery,
@@ -454,6 +476,69 @@ import type {
   /** Starts a new recovery episode for an explicit user operation. */
   private resetPlaybackRecovery(): void {
     this.playbackRecovery.reset();
+  }
+
+  /** Stops hidden paused sessions and resumes them without replacing media state. */
+  private syncPlaybackLifecycle(active: boolean): void {
+    const wasActive = this.playbackLifecycleActive;
+    this.playbackLifecycleActive = active;
+    if (!active) {
+      this.deps.loop.stop();
+      return;
+    }
+    if (
+      this.destroyed ||
+      !this.session ||
+      this.playerState.value === "loading" ||
+      this.playerState.value === "seeking" ||
+      this.playerState.value === "error"
+    ) {
+      return;
+    }
+    if (!wasActive) this.deps.loop.start();
+    this.deps.loop.wake();
+    this.resumeLifecyclePlayback();
+  }
+
+  /** Restores playback when WebKit pauses media during a page or orientation transition. */
+  private resumeLifecyclePlayback(): void {
+    if (
+      this.lifecycleResumeTask ||
+      !this.playbackIntent.shouldResume ||
+      !this.video.paused ||
+      !this.session
+    ) {
+      return;
+    }
+    const session = this.session;
+    const task = tryResumePlayback(this.video)
+      .then((resumed) => {
+        if (
+          !resumed ||
+          this.destroyed ||
+          !this.playbackLifecycleActive ||
+          !this.playbackIntent.shouldResume ||
+          this.session !== session
+        ) {
+          return;
+        }
+        this.playerState.set(this.video.paused ? "ready" : "playing");
+        if (!this.video.paused) this.deps.loop.wake();
+      })
+      .catch((error: unknown) => {
+        if (
+          !isAbortError(error) &&
+          !this.destroyed &&
+          this.playbackIntent.shouldResume &&
+          this.session === session
+        ) {
+          this.reportPlaybackFailure(asError(error));
+        }
+      })
+      .finally(() => {
+        if (this.lifecycleResumeTask === task) this.lifecycleResumeTask = null;
+      });
+    this.lifecycleResumeTask = task;
   }
 
   /** Publishes one final playback failure and aborts pending media work. */
