@@ -4,7 +4,7 @@ const MIN_SEEK_BUFFER_MS = 250;
 export function bufferedEndAtCurrentTime(
   video: Pick<HTMLVideoElement, "buffered" | "currentTime">,
 ): number {
-  const range = containingRange(video.buffered, video.currentTime);
+  const range = bufferedRangeAt(video.buffered, video.currentTime);
   return range ? Math.round(range.end * 1000) : 0;
 }
 
@@ -13,13 +13,13 @@ export function seekWithinBufferedMedia(
   targetMs: number,
 ): boolean {
   const safeTargetMs = Math.max(0, Math.round(targetMs));
-  const range = containingRange(video.buffered, safeTargetMs / 1000);
+  const range = bufferedRangeAt(video.buffered, safeTargetMs / 1000);
   if (!range || safeTargetMs > range.end * 1000 - MIN_SEEK_BUFFER_MS) return false;
   video.currentTime = safeTargetMs / 1000;
   return true;
 }
 
-function containingRange(ranges: TimeRanges, positionSeconds: number) {
+export function bufferedRangeAt(ranges: TimeRanges, positionSeconds: number) {
   for (let index = 0; index < ranges.length; index += 1) {
     const start = ranges.start(index);
     const end = ranges.end(index);

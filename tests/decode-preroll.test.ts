@@ -149,6 +149,27 @@ test("keeps a resumed position already within target tolerance", async () => {
   expect(plays).toBe(1);
 });
 
+test("keeps a decoded target when automatic resume needs a gesture", async () => {
+  const error = new Error("User interaction is required");
+  error.name = "NotAllowedError";
+  const video = {
+    autoplay: false,
+    currentTime: 30.25,
+    error: null,
+    muted: false,
+    paused: true,
+    playbackRate: 1,
+    readyState: 4,
+    pause: () => undefined,
+    play: async () => {
+      throw error;
+    },
+  } as unknown as HTMLVideoElement;
+
+  await runDecodePreroll(video, 30_298, true, new AbortController().signal);
+  expect(video.currentTime).toBe(30.25);
+});
+
 test("does not seek or pause a resumed preroll within target tolerance", async () => {
   let currentTime = 24.791;
   let currentTimeWrites = 0;

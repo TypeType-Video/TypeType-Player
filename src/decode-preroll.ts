@@ -1,4 +1,5 @@
 import type { PlaybackManifest } from "./manifest";
+import { tryResumePlayback } from "./media-playback";
 import { TransientMediaState } from "./transient-media-state";
 
 const TARGET_TOLERANCE_MS = 80;
@@ -37,7 +38,7 @@ export async function runDecodePreroll(
     const resumeWithinTolerance = resumePlayback && distanceMs <= TARGET_TOLERANCE_MS;
     if (!exact && !resumeWithinTolerance) await snapToTarget(video, targetMs, signal);
     if (resumePlayback && video.paused) {
-      await video.play();
+      await tryResumePlayback(video);
       ensureNotAborted(signal);
     }
     return;
@@ -57,7 +58,7 @@ export async function runDecodePreroll(
     if (!resumePlayback) {
       if (!pausedForSnap) video.pause();
     } else if (!signal.aborted) {
-      await video.play();
+      await tryResumePlayback(video);
       ensureNotAborted(signal);
     }
   }

@@ -171,21 +171,40 @@ test("updates the MSE live seekable range as the live head advances", () => {
   };
 
   controller.updateTiming(liveManifest);
+  controller.updateTiming(liveManifest);
   expect(mediaSource.duration).toBe(Number.POSITIVE_INFINITY);
   expect(mediaSource.liveRange).toEqual([30, 120]);
+  expect(mediaSource.durationWrites).toBe(1);
+  expect(mediaSource.liveRangeWrites).toBe(1);
+
+  controller.updateTiming({
+    ...liveManifest,
+    live: { ...liveManifest.live, seekableEndMs: 125_000 },
+  });
+  expect(mediaSource.liveRange).toEqual([30, 125]);
+  expect(mediaSource.liveRangeWrites).toBe(2);
 
   controller.updateTiming({ ...liveManifest, live: { ...liveManifest.live, active: false } });
   expect(mediaSource.liveRange).toBeNull();
   expect(mediaSource.duration).toBe(120);
+  expect(mediaSource.liveRangeClears).toBe(1);
+  expect(mediaSource.durationWrites).toBe(2);
+
+  controller.updateTiming(manifest(true));
+  expect(mediaSource.liveRangeClears).toBe(1);
+  expect(mediaSource.durationWrites).toBe(2);
 });
 
 class FakeMediaSource {
   readonly sourceBuffers: SourceBuffer[] = [];
   readonly removed: SourceBuffer[] = [];
-  duration = Number.NaN;
+  durationWrites = 0;
+  liveRangeWrites = 0;
+  liveRangeClears = 0;
   liveRange: [number, number] | null = null;
   readyState: ReadyState;
   private readonly listeners = new Map<string, () => void>();
+  private currentDuration = Number.NaN;
 
   constructor(readyState: ReadyState = "open") {
     this.readyState = readyState;
@@ -213,11 +232,22 @@ class FakeMediaSource {
   }
 
   setLiveSeekableRange(start: number, end: number): void {
+    this.liveRangeWrites += 1;
     this.liveRange = [start, end];
   }
 
   clearLiveSeekableRange(): void {
+    this.liveRangeClears += 1;
     this.liveRange = null;
+  }
+
+  get duration(): number {
+    return this.currentDuration;
+  }
+
+  set duration(value: number) {
+    this.durationWrites += 1;
+    this.currentDuration = value;
   }
 
   open(): void {

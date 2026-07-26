@@ -1,6 +1,7 @@
 import { AppendQueue } from "./append-queue";
 import type { ManifestTrack, PlaybackManifest } from "./manifest";
 import { createMediaSource, isMseTypeSupported } from "./media-source-runtime";
+import { MediaSourceTiming } from "./media-source-timing";
 import type { TrackKind } from "./types";
 
 export type MediaBufferedRange = {
@@ -26,6 +27,7 @@ export class MediaSourceController {
   private audioQueue: AppendQueue | null = null;
   private videoQueue: AppendQueue | null = null;
   private mediaSource: MediaSource | null = null;
+  private readonly timing = new MediaSourceTiming();
   private audioMime: string | null = null;
   private videoMime: string | null = null;
   private remotePlaybackPreference: boolean | null = null;
@@ -148,6 +150,7 @@ export class MediaSourceController {
       }
     }
     this.mediaSource = null;
+    this.timing.reset();
     if (ownsMediaElement) {
       this.video.removeAttribute("src");
       this.video.load();
@@ -198,17 +201,6 @@ export class MediaSourceController {
   }
 
   private applyTiming(mediaSource: MediaSource, manifest: PlaybackManifest): void {
-    const live = manifest.live;
-    if (live?.active) {
-      mediaSource.duration = Number.POSITIVE_INFINITY;
-      if (typeof mediaSource.setLiveSeekableRange === "function") {
-        mediaSource.setLiveSeekableRange(live.seekableStartMs / 1000, live.seekableEndMs / 1000);
-      }
-      return;
-    }
-    if (typeof mediaSource.clearLiveSeekableRange === "function") {
-      mediaSource.clearLiveSeekableRange();
-    }
-    mediaSource.duration = manifest.durationMs > 0 ? manifest.durationMs / 1000 : Number.NaN;
+    this.timing.apply(mediaSource, manifest);
   }
 }
