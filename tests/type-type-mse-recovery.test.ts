@@ -173,6 +173,19 @@ test("recovers two consecutive active sessions before one final error", async ()
   expect(failures.map((error) => error.message)).toEqual(["SABR demand stalled"]);
 });
 
+test("preserves explicit playback intent when stalled media reports paused", async () => {
+  const { player } = harness(async () => response("fresh"), true);
+  player.playbackIntent.play();
+
+  player.handlePlaybackLoopError(recoveryError(), {
+    sessionId: "source",
+    signal: player.operation.signal,
+  });
+  await Bun.sleep(0);
+
+  expect(player.playbackIntent.shouldResume).toBe(true);
+});
+
 test("ignores duplicate old-session events while recovery is pending", async () => {
   let release: ((value: PlaybackResponse) => void) | null = null;
   const pending = new Promise<PlaybackResponse>((resolve) => {

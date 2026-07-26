@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { BufferedSeekRecovery } from "../src/buffered-seek-recovery";
 import type { PlaybackResponse } from "../src/playback-client";
 import { PlaybackIntent } from "../src/playback-intent";
 import { PlayerOperation } from "../src/player-operation";
@@ -13,6 +14,7 @@ type QualityHarness = {
   session: LoadedSession;
   operation: PlayerOperation;
   playbackRecovery: PlaybackRecovery;
+  bufferedSeekRecovery: BufferedSeekRecovery;
   playbackIntent: PlaybackIntent;
   seekController: SeekController;
   video: { currentTime: number; paused: boolean };
@@ -108,6 +110,7 @@ function harness(
   player.session = session();
   player.operation = new PlayerOperation();
   player.playbackRecovery = new PlaybackRecovery();
+  player.bufferedSeekRecovery = new BufferedSeekRecovery(() => () => undefined);
   player.playbackIntent = new PlaybackIntent();
   player.seekController = new SeekController();
   player.video = { currentTime: 120, paused: false };
