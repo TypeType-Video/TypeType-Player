@@ -83,8 +83,11 @@ test("refreshes playback state while polling a delayed window", async () => {
     },
     () => playerTimeMs,
     new AbortController().signal,
+    () => 4,
   );
 
   expect(requests.map((request) => request.playerTimeMs)).toEqual([37_000, 37_000, 66_000, 66_000]);
+  expect(requests.map((request) => request.playbackRate)).toEqual([4, 4, 4, 4]);
+  expect(requests.map((request) => request.bufferGoalMs)).toEqual([60_000, 60_000, 60_000, 60_000]);
   expect(requests.at(-1)?.bufferedRanges.map((range) => range.endMs)).toEqual([69_000, 69_000]);
 });
