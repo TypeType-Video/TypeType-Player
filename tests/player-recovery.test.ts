@@ -103,17 +103,6 @@ test("does not reset the attempt budget during active recovery", () => {
   expect(recovery.begin("after-recovery")).toBe("exhausted");
 });
 
-test("never returns to a previously attempted video format", () => {
-  const recovery = new PlaybackRecovery();
-  const first = recoveryError("retry_fresh_session_lower_video_itag", [136, 137]);
-  const second = recoveryError("retry_fresh_session_lower_video_itag", [137, 136, 135]);
-
-  const selected = recovery.nextLowerVideoItag(first, 137);
-  expect(selected).toBe(136);
-  expect(recovery.takeAttempt(selected)).toBe(true);
-  expect(recovery.nextLowerVideoItag(second, selected)).toBe(135);
-});
-
 test("reports only one final failure per recovery chain", () => {
   const recovery = new PlaybackRecovery();
   const failures: string[] = [];
@@ -172,7 +161,7 @@ test("uses two fresh sessions with the exact playback selection and position", a
   expect(session.response.sessionId).toBe("fresh-2");
 });
 
-test("walks backend-provided lower formats across bounded recovery attempts", async () => {
+test("keeps the exact video format when a legacy backend requests a lower itag", async () => {
   const recovery = new PlaybackRecovery();
   const requests: CreatePlaybackRequest[] = [];
 
@@ -185,19 +174,19 @@ test("walks backend-provided lower formats across bounded recovery attempts", as
     signal: new AbortController().signal,
     create: async (request) => {
       requests.push(request);
-      return response(`lower-${request.videoItag}`);
+      return response(`fresh-${requests.length}`);
     },
     ensureCurrent: () => undefined,
     switchSession: async (playback, selection) => {
-      if (selection.videoItag === 136) {
+      if (playback.sessionId === "fresh-1") {
         throw recoveryError("retry_fresh_session_lower_video_itag", [136, 135]);
       }
       return loaded(playback.sessionId, selection.videoItag);
     },
   });
 
-  expect(requests.map((request) => request.videoItag)).toEqual([136, 135]);
-  expect(session.videoItag).toBe(135);
+  expect(requests.map((request) => request.videoItag)).toEqual([137, 137]);
+  expect(session.videoItag).toBe(137);
 });
 
 test("stops recovery immediately when its operation is aborted", async () => {
