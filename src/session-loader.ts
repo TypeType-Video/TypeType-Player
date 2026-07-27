@@ -1,6 +1,6 @@
 import type { BufferPolicy } from "./buffer-policy";
 import type { PlaybackManifest } from "./manifest";
-import { type MediaBufferedRange, MediaSourceController } from "./media-source-controller";
+import { MediaSourceController } from "./media-source-controller";
 import type { PlaybackClient, PlaybackResponse } from "./playback-client";
 import type { PlaybackWindowRequest } from "./playback-window";
 import {
@@ -8,6 +8,7 @@ import {
   PlaybackWindowTerminalError,
   PlaybackWindowTimeoutError,
 } from "./playback-window-error";
+import { createPlaybackWindowRequest } from "./playback-window-request";
 import type { SegmentScheduler } from "./segment-scheduler";
 
 export { PlaybackWindowRecoveryError } from "./playback-window-error";
@@ -32,21 +33,15 @@ type LoadSessionArgs = {
   audioTrackId: string | null;
   audioOnly: boolean;
   startTimeMs: number;
+  playbackRate?: (() => number) | undefined;
   policy: BufferPolicy;
   signal: AbortSignal;
   beforeAttach?: () => Promise<void>;
 };
 
-type PlaybackWindowRequestArgs = Pick<
-  LoadSessionArgs,
-  "response" | "videoItag" | "audioItag" | "audioTrackId" | "audioOnly" | "policy"
-> & {
-  media: Pick<MediaSourceController, "bufferedRanges">;
-};
-
 export async function loadPlaybackSession(args: LoadSessionArgs): Promise<LoadedSession> {
   const startTimeMs = args.response.startTimeMs ?? args.startTimeMs;
-  const request = { ...playbackWindowRequest(args, startTimeMs), bufferedRanges: [] };
+  const request = { ...createPlaybackWindowRequest(args, startTimeMs), bufferedRanges: [] };
   const window = await waitForWindow(args, args.response.sessionId, request);
   if (!window.manifest) throw new Error("Playback window is not ready");
   const resolvedStartTimeMs =
@@ -100,9 +95,10 @@ export async function refreshPlaybackWindow(
   policy: BufferPolicy,
   playerTimeMs: () => number,
   signal: AbortSignal,
+  playbackRate?: () => number,
 ): Promise<void> {
   const window = await pollSegments({ playback, policy, signal }, session.response.sessionId, () =>
-    playbackWindowRequest({ ...session, media, policy }, playerTimeMs()),
+    createPlaybackWindowRequest({ ...session, media, policy, playbackRate }, playerTimeMs()),
   );
   if (!window?.manifest) return;
   ensureNotAborted(signal);
@@ -115,34 +111,6 @@ export async function refreshPlaybackWindow(
   session.response = { ...session.response, generation: window.generation, startTimeMs, live };
   session.manifest = { ...window.manifest, startTimeMs, live };
   media.updateTiming?.(session.manifest);
-}
-
-function playbackWindowRequest(
-  args: PlaybackWindowRequestArgs,
-  playerTimeMs: number,
-): PlaybackWindowRequest {
-  return {
-    generation: args.response.generation,
-    playerTimeMs,
-    videoItag: args.videoItag,
-    audioItag: args.audioItag,
-    audioTrackId: args.audioTrackId,
-    audioOnly: args.audioOnly,
-    bufferGoalMs: args.policy.bufferGoalMs,
-    backBufferMs: args.policy.backBufferMs,
-    bufferedRanges: playbackBufferedRanges(args.media.bufferedRanges(), args),
-  };
-}
-
-function playbackBufferedRanges(
-  ranges: MediaBufferedRange[],
-  args: Pick<LoadSessionArgs, "videoItag" | "audioItag">,
-): PlaybackWindowRequest["bufferedRanges"] {
-  return ranges.map((range) => ({
-    itag: range.kind === "audio" ? args.audioItag : args.videoItag,
-    startMs: range.startMs,
-    endMs: range.endMs,
-  }));
 }
 
 async function waitForWindow(

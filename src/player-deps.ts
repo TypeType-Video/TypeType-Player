@@ -5,6 +5,7 @@ import { MediaElementObserver } from "./media-element-observer";
 import { MediaSourceController } from "./media-source-controller";
 import { PlaybackClient } from "./playback-client";
 import { PlaybackLoop, type PlaybackLoopFailureContext } from "./playback-loop";
+import { StablePlaybackRate } from "./playback-rate";
 import { bufferedEndMs } from "./player-snapshot";
 import { SegmentScheduler } from "./segment-scheduler";
 import type { LoadedSession } from "./session-loader";
@@ -18,6 +19,7 @@ export type PlayerDeps = {
   scheduler: SegmentScheduler;
   loop: PlaybackLoop;
   policy: BufferPolicy;
+  playbackRate: () => number;
   destroy: () => void;
 };
 
@@ -41,6 +43,8 @@ export function createPlayerDeps(args: Args): PlayerDeps {
   );
   const playback = new PlaybackClient(http);
   const policy = resolveBufferPolicy(args.config);
+  const stablePlaybackRate = new StablePlaybackRate(args.video);
+  const playbackRate = () => stablePlaybackRate.current();
   const mediaEvents = new MediaElementObserver({
     video: args.video,
     state: args.state,
@@ -56,6 +60,7 @@ export function createPlayerDeps(args: Args): PlayerDeps {
     scheduler,
     emitter: args.emitter,
     policy,
+    playbackRate,
     session: args.session,
     signal: args.signal,
     bufferedEndMs: () => bufferedEndMs(args.video),
@@ -66,5 +71,5 @@ export function createPlayerDeps(args: Args): PlayerDeps {
     mediaEvents.stop();
     media.detach();
   };
-  return { http, playback, mediaEvents, media, scheduler, loop, policy, destroy };
+  return { http, playback, mediaEvents, media, scheduler, loop, policy, playbackRate, destroy };
 }

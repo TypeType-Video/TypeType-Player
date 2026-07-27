@@ -1,30 +1,11 @@
-import type { BufferPolicy } from "./buffer-policy";
-import type { EventEmitter } from "./event-emitter";
-import type { MediaSourceController } from "./media-source-controller";
-import type { PlaybackClient } from "./playback-client";
 import { PlaybackLoopTaskController } from "./playback-loop-task-controller";
+import type { PlaybackLoopArgs, PlaybackLoopFailureContext } from "./playback-loop-types";
+import { rateAwareBufferGoalMs, refreshThresholdMs } from "./playback-rate";
 import { currentTimeMs } from "./player-snapshot";
-import type { SegmentScheduler } from "./segment-scheduler";
 import type { LoadedSession } from "./session-loader";
 import { refreshPlaybackWindow } from "./session-loader";
 
-type PlaybackLoopArgs = {
-  video: { currentTime: number; paused: boolean; readyState: number };
-  playback: Pick<PlaybackClient, "position" | "prefetch" | "segments">;
-  media: Pick<MediaSourceController, "bufferedRanges" | "endOfStream" | "trim">;
-  scheduler: Pick<SegmentScheduler, "fill">;
-  emitter: Pick<EventEmitter, "emit">;
-  policy: BufferPolicy;
-  session: () => LoadedSession | null;
-  signal: () => AbortSignal;
-  bufferedEndMs: () => number;
-  error: (error: Error, context: PlaybackLoopFailureContext) => void;
-};
-
-export type PlaybackLoopFailureContext = {
-  sessionId: string | null;
-  signal: AbortSignal;
-};
+export type { PlaybackLoopFailureContext } from "./playback-loop-types";
 
 export class PlaybackLoop {
   private fillTimer: ReturnType<typeof setInterval> | null = null;
@@ -101,7 +82,10 @@ export class PlaybackLoop {
     revision: number,
   ): Promise<void> {
     const currentMs = currentTimeMs(this.args.video);
-    const bufferGoalMs = this.args.policy.bufferGoalMs;
+    const bufferGoalMs = rateAwareBufferGoalMs(
+      this.args.policy.bufferGoalMs,
+      this.args.playbackRate?.() ?? 1,
+    );
     const goalMs = currentMs + bufferGoalMs + this.liveStallRecoveryMs(bufferGoalMs);
     await this.args.scheduler.fill(session.manifest, currentMs, goalMs, signal);
     this.ensureCurrent(revision, signal);
@@ -150,6 +134,7 @@ export class PlaybackLoop {
       this.args.policy,
       () => currentTimeMs(this.args.video),
       signal,
+      this.args.playbackRate,
     );
     this.ensureCurrent(revision, signal);
   }
@@ -178,7 +163,9 @@ export class PlaybackLoop {
   private requestManifestRefreshIfNeeded(revision: number): void {
     if (revision !== this.revision) return;
     const currentMs = currentTimeMs(this.args.video);
-    const thresholdMs = refreshThresholdMs(this.args.policy.bufferGoalMs);
+    const thresholdMs = refreshThresholdMs(
+      rateAwareBufferGoalMs(this.args.policy.bufferGoalMs, this.args.playbackRate?.() ?? 1),
+    );
     const session = this.args.session();
     const waitingForLiveData = this.waitingForLiveData(session);
     if (waitingForLiveData || this.args.bufferedEndMs() < currentMs + thresholdMs) {
@@ -216,10 +203,6 @@ export class PlaybackLoop {
       throw new DOMException("Operation aborted", "AbortError");
     }
   }
-}
-
-function refreshThresholdMs(bufferGoalMs: number): number {
-  return Math.min(bufferGoalMs, Math.max(5_000, Math.round((bufferGoalMs * 2) / 3)));
 }
 
 const HAVE_FUTURE_DATA = 3;

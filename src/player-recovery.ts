@@ -1,5 +1,5 @@
 import type { CreatePlaybackRequest, PlaybackResponse } from "./playback-client";
-import { type LoadedSession, PlaybackWindowRecoveryError } from "./session-loader";
+import type { LoadedSession, PlaybackWindowRecoveryError } from "./session-loader";
 
 export const MAX_FRESH_SESSION_RECOVERIES = 2;
 const STABLE_PLAYBACK_RESET_MS = 30_000;
@@ -16,7 +16,6 @@ export class PlaybackRecovery {
   private lastProgressAtMs: number | null = null;
   private lastPositionMs: number | null = null;
   private readonly handledSessionIds = new Set<string>();
-  private readonly attemptedVideoItags = new Set<number>();
   private failureReported = false;
 
   begin(sessionId: string): PlaybackRecoveryDecision {
@@ -29,20 +28,10 @@ export class PlaybackRecovery {
     return "recover";
   }
 
-  takeAttempt(videoItag: number): boolean {
+  takeAttempt(_videoItag: number): boolean {
     if (this.attempts >= MAX_FRESH_SESSION_RECOVERIES) return false;
     this.attempts += 1;
-    this.attemptedVideoItags.add(videoItag);
     return true;
-  }
-
-  nextLowerVideoItag(error: PlaybackWindowRecoveryError, currentVideoItag: number): number {
-    this.attemptedVideoItags.add(currentVideoItag);
-    const videoItag = error.retryVideoItags.find(
-      (candidate) => !this.attemptedVideoItags.has(candidate),
-    );
-    if (videoItag === undefined) throw error;
-    return videoItag;
   }
 
   complete(positionMs: number, nowMs = performance.now()): void {
@@ -95,7 +84,6 @@ export class PlaybackRecovery {
     this.lastProgressAtMs = null;
     this.lastPositionMs = null;
     this.handledSessionIds.clear();
-    this.attemptedVideoItags.clear();
     this.failureReported = false;
   }
 }
@@ -123,10 +111,7 @@ type RecoverArgs = {
 };
 
 export async function recoverPlaybackSession(args: RecoverArgs): Promise<LoadedSession> {
-  let videoItag = args.current.videoItag;
-  if (args.error.recoveryAction === "retry_fresh_session_lower_video_itag") {
-    videoItag = args.recovery.nextLowerVideoItag(args.error, videoItag);
-  }
+  const videoItag = args.current.videoItag;
   let lastError: unknown = args.error;
   while (args.recovery.takeAttempt(videoItag)) {
     try {
@@ -152,11 +137,6 @@ export async function recoverPlaybackSession(args: RecoverArgs): Promise<LoadedS
     } catch (error) {
       if (isAbortError(error)) throw error;
       lastError = error;
-      if (error instanceof PlaybackWindowRecoveryError) {
-        if (error.recoveryAction === "retry_fresh_session_lower_video_itag") {
-          videoItag = args.recovery.nextLowerVideoItag(error, videoItag);
-        }
-      }
     }
   }
   throw lastError;

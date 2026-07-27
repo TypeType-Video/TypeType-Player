@@ -22,6 +22,7 @@ export type PlaybackWindowRequest = {
   audioItag: number;
   audioTrackId: string | null;
   audioOnly: boolean;
+  playbackRate: number;
   bufferGoalMs: number;
   backBufferMs: number;
   bufferedRanges: PlaybackBufferedRange[];

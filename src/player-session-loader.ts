@@ -1,4 +1,5 @@
 import { decodeStartMs } from "./decode-preroll";
+import { rateAwareBufferGoalMs } from "./playback-rate";
 import type { PlayerDeps } from "./player-deps";
 import type { PlaybackRecovery } from "./player-recovery";
 import {
@@ -26,6 +27,7 @@ type PlayerSessionDeps = {
   media: Pick<PlayerDeps["media"], "attach" | "bufferedRanges">;
   scheduler: Pick<PlayerDeps["scheduler"], "appendInit" | "fill" | "reset">;
   policy: PlayerDeps["policy"];
+  playbackRate?: PlayerDeps["playbackRate"];
 };
 
 type TrackSelection = {
@@ -85,6 +87,7 @@ async function loadSelectedSession(
     audioTrackId: selection.audioTrackId,
     audioOnly: args.config.audioOnly === true,
     startTimeMs: requestedStartTimeMs,
+    playbackRate: args.deps.playbackRate,
     policy: args.deps.policy,
     signal: args.signal,
     ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {}),
@@ -95,7 +98,8 @@ async function loadSelectedSession(
   await args.deps.scheduler.fill(
     session.manifest,
     fillStartMs,
-    startTimeMs + args.deps.policy.bufferGoalMs,
+    startTimeMs +
+      rateAwareBufferGoalMs(args.deps.policy.bufferGoalMs, args.deps.playbackRate?.() ?? 1),
     args.signal,
   );
   if (args.signal.aborted) throw new DOMException("Operation aborted", "AbortError");
@@ -107,13 +111,9 @@ async function recoverInitialSession(
   selection: TrackSelection,
   initialError: PlaybackWindowRecoveryError,
 ): Promise<LoadedSession> {
-  let videoItag = selection.videoItag;
+  const videoItag = selection.videoItag;
   let lastError: unknown = initialError;
-  let recoveryError: PlaybackWindowRecoveryError | null = initialError;
   while (true) {
-    if (recoveryError?.recoveryAction === "retry_fresh_session_lower_video_itag") {
-      videoItag = args.recovery.nextLowerVideoItag(recoveryError, videoItag);
-    }
     if (!args.recovery.takeAttempt(videoItag)) throw lastError;
     try {
       const response = await args.deps.playback.create(
@@ -133,7 +133,6 @@ async function recoverInitialSession(
     } catch (error) {
       if (isAbortError(error)) throw error;
       lastError = error;
-      if (error instanceof PlaybackWindowRecoveryError) recoveryError = error;
     }
   }
 }
