@@ -2,6 +2,7 @@ type MediaStateSnapshot = {
   autoplay: boolean;
   defaultPlaybackRate: number;
   muted: boolean;
+  opacity: string | null;
   playbackRate: number;
 };
 
@@ -27,6 +28,7 @@ export class TransientMediaState {
       autoplay: this.video.autoplay,
       defaultPlaybackRate: this.video.defaultPlaybackRate,
       muted: this.video.muted,
+      opacity: this.video.style?.opacity ?? null,
       playbackRate: this.video.playbackRate,
     };
     this.video.defaultPlaybackRate = this.snapshot.playbackRate;
@@ -38,6 +40,7 @@ export class TransientMediaState {
   begin(): () => void {
     const restore = this.preserve();
     this.video.muted = true;
+    if (this.video.style) this.video.style.opacity = "0";
     this.video.playbackRate = 16;
     this.video.autoplay = true;
     return restore;
@@ -49,6 +52,7 @@ export class TransientMediaState {
     this.video.defaultPlaybackRate = snapshot.defaultPlaybackRate;
     this.video.playbackRate = snapshot.playbackRate;
     this.video.muted = snapshot.muted;
+    if (snapshot.opacity !== null && this.video.style) this.video.style.opacity = snapshot.opacity;
     this.video.autoplay = snapshot.autoplay;
     this.snapshot = null;
     this.revision += 1;

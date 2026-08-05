@@ -8,12 +8,14 @@ test("restores the media element after a temporary override", () => {
   const restore = state.begin();
   expect(state.active).toBe(true);
   expect(video.muted).toBe(true);
+  expect(video.style.opacity).toBe("0");
   expect(video.playbackRate).toBe(16);
   expect(video.autoplay).toBe(true);
 
   restore();
   expect(state.active).toBe(false);
   expect(video.muted).toBe(false);
+  expect(video.style.opacity).toBe("0.75");
   expect(video.playbackRate).toBe(1.25);
   expect(video.autoplay).toBe(false);
 });
@@ -89,5 +91,6 @@ function videoElement(): HTMLVideoElement {
     defaultPlaybackRate: 1,
     muted: false,
     playbackRate: 1.25,
+    style: { opacity: "0.75" },
   } as HTMLVideoElement;
 }
