@@ -17,7 +17,7 @@ type QualityHarness = {
   bufferedSeekRecovery: BufferedSeekRecovery;
   playbackIntent: PlaybackIntent;
   seekController: SeekController;
-  video: { currentTime: number; paused: boolean };
+  video: { currentTime: number; paused: boolean; pause: () => void };
   playerState: { value: TypeTypeMseState; set: (state: TypeTypeMseState) => void };
   deps: {
     loop: { stop: () => void; start: () => void; quiesce: () => Promise<void> };
@@ -69,11 +69,12 @@ test("stops the active playback loop before a timeline seek", async () => {
     async () => {
       events.push("quiesce");
     },
+    () => events.push("pause"),
   );
 
   await player.performSeek(120_000);
 
-  expect(events).toEqual(["stop", "quiesce", "seek"]);
+  expect(events).toEqual(["stop", "quiesce", "pause", "seek"]);
 });
 
 test("aborts an obsolete quality preparation and applies only the latest selection", async () => {
@@ -111,6 +112,7 @@ function harness(
   seek: QualityHarness["deps"]["playback"]["seek"],
   stop: () => void,
   quiesce: () => Promise<void> = async () => undefined,
+  pause: () => void = () => undefined,
 ): QualityHarness {
   const player = Object.create(TypeTypeMsePlayer.prototype) as QualityHarness;
   player.destroyed = false;
@@ -120,7 +122,14 @@ function harness(
   player.bufferedSeekRecovery = new BufferedSeekRecovery(() => () => undefined);
   player.playbackIntent = new PlaybackIntent();
   player.seekController = new SeekController();
-  player.video = { currentTime: 120, paused: false };
+  player.video = {
+    currentTime: 120,
+    paused: false,
+    pause: () => {
+      player.video.paused = true;
+      pause();
+    },
+  };
   player.playerState = {
     value: "playing",
     set: (state) => (player.playerState.value = state),
