@@ -148,7 +148,13 @@ import type {
   /** Starts or resumes playback after loading. */ async play(): Promise<void> {
     ensurePlayerAlive(this.destroyed);
     this.playbackIntent.play();
-    if (!this.session || this.playerState.value === "loading") return;
+    if (
+      !this.session ||
+      this.playerState.value === "loading" ||
+      this.playerState.value === "seeking"
+    ) {
+      return;
+    }
     if (this.pendingPrerollTargetMs !== null) {
       const targetMs = this.pendingPrerollTargetMs;
       await this.runDecodePreroll(targetMs, true, this.operation.signal);
@@ -163,7 +169,9 @@ import type {
   /** Pauses playback while preserving the current session and buffer. */ pause(): void {
     this.playbackIntent.pause();
     this.video.pause();
-    this.playerState.set("ready");
+    if (this.playerState.value !== "loading" && this.playerState.value !== "seeking") {
+      this.playerState.set("ready");
+    }
   }
   /** Seeks to a millisecond position without replacing the media element. */
   async seek(positionMs: number): Promise<void> {
@@ -301,6 +309,7 @@ import type {
       this.operation.ensureCurrent(this.destroyed, revision);
     }
     this.playerState.set("seeking");
+    if (!quality) this.video.pause();
     this.emitter.emit({ type: "seek", positionMs: targetMs });
     try {
       const response = await this.deps.playback.seek(

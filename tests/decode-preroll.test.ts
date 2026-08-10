@@ -42,15 +42,23 @@ test("keeps the target for audio-only manifests", () => {
 });
 
 test("decodes a paused frame at an existing target", async () => {
+  let currentTime = 207.599;
   let plays = 0;
   let pauses = 0;
   let readyState = 1;
   const video = {
     autoplay: false,
-    currentTime: 207.599,
     error: null,
     muted: false,
+    paused: true,
     playbackRate: 1,
+    get currentTime() {
+      return currentTime;
+    },
+    set currentTime(value: number) {
+      currentTime = value;
+      readyState = 2;
+    },
     get readyState() {
       return readyState;
     },
@@ -63,7 +71,7 @@ test("decodes a paused frame at an existing target", async () => {
     },
   } as unknown as HTMLVideoElement;
   await runDecodePreroll(video, 207_599, false, new AbortController().signal, true);
-  expect(plays).toBe(1);
+  expect(plays).toBe(0);
   expect(pauses).toBe(1);
   expect(video.muted).toBe(false);
   expect(video.playbackRate).toBe(1);
@@ -88,7 +96,7 @@ test("snaps an overshot decoded frame to the exact target", async () => {
   expect(plays).toBe(0);
 });
 
-test("does not seek again after preroll decodes the exact target frame", async () => {
+test("seeks once to the exact target before resuming", async () => {
   let currentTime = 24.791;
   let currentTimeWrites = 0;
   let plays = 0;
@@ -96,6 +104,7 @@ test("does not seek again after preroll decodes the exact target frame", async (
     autoplay: false,
     error: null,
     muted: false,
+    paused: true,
     playbackRate: 1,
     readyState: 4,
     get currentTime() {
@@ -114,8 +123,8 @@ test("does not seek again after preroll decodes the exact target frame", async (
 
   await runDecodePreroll(video, 30_298, true, new AbortController().signal);
 
-  expect(plays).toBe(2);
-  expect(currentTimeWrites).toBe(0);
+  expect(plays).toBe(1);
+  expect(currentTimeWrites).toBe(1);
   expect(video.currentTime).toBe(30.298);
 });
 
@@ -170,7 +179,7 @@ test("keeps a decoded target when automatic resume needs a gesture", async () =>
   expect(video.currentTime).toBe(30.25);
 });
 
-test("does not seek or pause a resumed preroll within target tolerance", async () => {
+test("resumes directly after seeking to the target", async () => {
   let currentTime = 24.791;
   let currentTimeWrites = 0;
   let plays = 0;
@@ -179,6 +188,7 @@ test("does not seek or pause a resumed preroll within target tolerance", async (
     autoplay: false,
     error: null,
     muted: false,
+    paused: true,
     playbackRate: 1,
     readyState: 4,
     get currentTime() {
@@ -193,15 +203,14 @@ test("does not seek or pause a resumed preroll within target tolerance", async (
     },
     play: async () => {
       plays += 1;
-      if (plays === 1) currentTime = 30.23;
     },
   } as unknown as HTMLVideoElement;
 
   await runDecodePreroll(video, 30_298, true, new AbortController().signal);
 
-  expect(currentTimeWrites).toBe(0);
+  expect(currentTimeWrites).toBe(1);
   expect(pauses).toBe(0);
-  expect(plays).toBe(2);
+  expect(plays).toBe(1);
 });
 
 test("keeps the exact snap for a paused preroll", async () => {

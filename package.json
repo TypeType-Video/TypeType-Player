@@ -1,6 +1,6 @@
 {
   "name": "@typetype/mse",
-  "version": "0.1.43",
+  "version": "0.1.44",
   "description": "MSE playback engine for TypeType",
   "license": "MIT",
   "type": "module",
@@ -39,7 +39,7 @@
     "publish:jsr": "deno publish"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.6",
+    "@biomejs/biome": "^2.5.7",
     "typescript": "~7.0.2"
   },
   "publishConfig": {

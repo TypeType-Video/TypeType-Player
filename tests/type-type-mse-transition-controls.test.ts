@@ -1,0 +1,53 @@
+import { expect, test } from "bun:test";
+import { PlaybackIntent } from "../src/playback-intent";
+import type { LoadedSession } from "../src/session-loader";
+import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
+import type { TypeTypeMseState } from "../src/types";
+
+type TransitionHarness = {
+  destroyed: boolean;
+  session: LoadedSession;
+  pendingPrerollTargetMs: number | null;
+  playbackIntent: PlaybackIntent;
+  playerState: { value: TypeTypeMseState; set: (state: TypeTypeMseState) => void };
+  video: { paused: boolean; pause: () => void; play: () => Promise<void> };
+  play: () => Promise<void>;
+  pause: () => void;
+};
+
+test("queues playback intent while a session seek is in progress", async () => {
+  let plays = 0;
+  let pauses = 0;
+  const player = Object.create(TypeTypeMsePlayer.prototype) as TransitionHarness;
+  player.destroyed = false;
+  player.session = {} as LoadedSession;
+  player.pendingPrerollTargetMs = null;
+  player.playbackIntent = new PlaybackIntent();
+  player.playerState = {
+    value: "seeking",
+    set: (state) => (player.playerState.value = state),
+  };
+  player.video = {
+    paused: true,
+    pause: () => {
+      pauses += 1;
+      player.video.paused = true;
+    },
+    play: async () => {
+      plays += 1;
+      player.video.paused = false;
+    },
+  };
+
+  await player.play();
+
+  expect(player.playbackIntent.shouldResume).toBe(true);
+  expect(plays).toBe(0);
+  expect(player.playerState.value).toBe("seeking");
+
+  player.pause();
+
+  expect(player.playbackIntent.shouldResume).toBe(false);
+  expect(pauses).toBe(1);
+  expect(player.playerState.value).toBe("seeking");
+});
