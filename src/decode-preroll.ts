@@ -1,5 +1,5 @@
 import type { PlaybackManifest } from "./manifest";
-import { tryResumePlayback } from "./media-playback";
+import { playMedia, tryResumePlayback } from "./media-playback";
 import { TransientMediaState } from "./transient-media-state";
 
 const TARGET_TOLERANCE_MS = 80;
@@ -48,7 +48,7 @@ export async function runDecodePreroll(
       resumeAttempted = await snapToTarget(video, targetMs, signal, resumePlayback);
     }
     if (resumePlayback && !resumeAttempted && video.paused) {
-      await tryResumePlayback(video);
+      await tryResumePlayback(video, signal);
       ensureNotAborted(signal);
     }
     return;
@@ -58,7 +58,7 @@ export async function runDecodePreroll(
     try {
       const resumeAttempted = await snapToTarget(video, targetMs, signal, resumePlayback);
       if (resumePlayback) {
-        if (!resumeAttempted && video.paused) await tryResumePlayback(video);
+        if (!resumeAttempted && video.paused) await tryResumePlayback(video, signal);
       } else {
         video.pause();
       }
@@ -73,7 +73,7 @@ export async function runDecodePreroll(
   const restoreMediaState = transientState.beginPreroll();
   let pausedForSnap = false;
   try {
-    await video.play();
+    await playMedia(video, signal);
     await waitForTarget(video, targetMs, signal);
     if (!resumePlayback) {
       video.pause();
@@ -85,7 +85,7 @@ export async function runDecodePreroll(
     if (!resumePlayback) {
       if (!pausedForSnap) video.pause();
     } else if (!signal.aborted && video.paused) {
-      await tryResumePlayback(video);
+      await tryResumePlayback(video, signal);
       ensureNotAborted(signal);
     }
   }
@@ -110,7 +110,7 @@ async function snapToTarget(
   let resumeAttempted = false;
   if (resumePlayback && video.paused) {
     resumeAttempted = true;
-    await tryResumePlayback(video);
+    await tryResumePlayback(video, signal);
     ensureNotAborted(signal);
   }
   return new Promise((resolve, reject) => {

@@ -4,7 +4,7 @@ import { EventEmitter } from "./event-emitter";
 import { LiveEdgeFollower } from "./live-edge-follower";
 import { skipBufferedLiveGap } from "./live-media-gap";
 import { canSeekWithinBufferedMedia } from "./media-buffer";
-import { tryResumePlayback } from "./media-playback";
+import { playMedia, tryResumePlayback } from "./media-playback";
 import { PlaybackIntent } from "./playback-intent";
 import {
   browserPlaybackLifecycleTargets,
@@ -36,6 +36,7 @@ import type {
   private readonly playbackIntent = new PlaybackIntent();
   private readonly seekController = new SeekController();
   private readonly operation = new PlayerOperation();
+  private readonly playbackAttempt = new PlayerOperation();
   private readonly playbackRecovery = new PlaybackRecovery();
   private readonly bufferedSeekRecovery = new BufferedSeekRecovery();
   private readonly transientMediaState: TransientMediaState;
@@ -155,19 +156,24 @@ import type {
     ) {
       return;
     }
+    const revision = this.playbackAttempt.next();
+    const signal = this.playbackAttempt.signal;
     if (this.pendingPrerollTargetMs !== null) {
       const targetMs = this.pendingPrerollTargetMs;
-      await this.runDecodePreroll(targetMs, true, this.operation.signal);
+      await this.runDecodePreroll(targetMs, true, signal);
+      this.playbackAttempt.ensureCurrent(this.destroyed, revision);
       this.pendingPrerollTargetMs = null;
       this.playerState.set("playing");
       return;
     }
-    await this.video.play();
+    await playMedia(this.video, signal);
+    this.playbackAttempt.ensureCurrent(this.destroyed, revision);
     this.playerState.set("playing");
   }
 
   /** Pauses playback while preserving the current session and buffer. */ pause(): void {
     this.playbackIntent.pause();
+    this.playbackAttempt.abort();
     this.video.pause();
     if (this.playerState.value !== "loading" && this.playerState.value !== "seeking") {
       this.playerState.set("ready");
@@ -278,6 +284,7 @@ import type {
     if (this.destroyed) return;
     this.destroyed = true;
     this.operation.abort();
+    this.playbackAttempt.abort();
     this.transientMediaState.restore();
     this.stopPageSuspensionObserver();
     this.stopPlaybackLifecycleObserver();
