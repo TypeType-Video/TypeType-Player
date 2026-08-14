@@ -1,3 +1,5 @@
+import { tryResumePlayback } from "./media-playback";
+
 export class PlaybackIntent {
   private resume = false;
 
@@ -15,5 +17,13 @@ export class PlaybackIntent {
 
   pause(): void {
     this.resume = false;
+  }
+
+  async apply(video: HTMLVideoElement, signal?: AbortSignal): Promise<void> {
+    if (this.resume) {
+      if (video.paused) await tryResumePlayback(video, signal);
+    } else if (!video.paused) {
+      video.pause();
+    }
   }
 }

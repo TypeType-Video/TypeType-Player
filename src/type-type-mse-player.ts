@@ -3,7 +3,7 @@ import { decodeStartMs, runDecodePreroll } from "./decode-preroll";
 import { EventEmitter } from "./event-emitter";
 import { LiveEdgeFollower } from "./live-edge-follower";
 import { skipBufferedLiveGap } from "./live-media-gap";
-import { canSeekWithinBufferedMedia } from "./media-buffer";
+import { alignPlayheadToBufferedRange, canSeekWithinBufferedMedia } from "./media-buffer";
 import { playMedia, tryResumePlayback } from "./media-playback";
 import { PlaybackIntent } from "./playback-intent";
 import {
@@ -415,6 +415,7 @@ import type {
       this.session = session;
       await this.deps.loop.fillOnce();
       this.operation.ensureCurrent(this.destroyed, revision);
+      alignPlayheadToBufferedRange(this.video);
       if (resolvedStartTimeMs > startMs) {
         if (this.playbackIntent.shouldResume) {
           await this.runDecodePreroll(resolvedStartTimeMs, true, signal);
@@ -439,6 +440,7 @@ import type {
       } else {
         this.pendingPrerollTargetMs = null;
       }
+      await this.playbackIntent.apply(this.video, signal);
       this.operation.ensureCurrent(this.destroyed, revision);
       this.playbackRecovery.complete(currentTimeMs(this.video));
       this.liveEdgeFollower.initialize(currentTimeMs(this.video), session.manifest.live);
