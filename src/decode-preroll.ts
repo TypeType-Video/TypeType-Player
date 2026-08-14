@@ -70,7 +70,7 @@ export async function runDecodePreroll(
       video.currentTime = decodeStartSeconds;
     }
   }
-  const restoreMediaState = transientState.begin();
+  const restoreMediaState = transientState.beginPreroll();
   let pausedForSnap = false;
   try {
     await video.play();

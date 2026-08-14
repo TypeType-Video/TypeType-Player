@@ -39,11 +39,28 @@ export class TransientMediaState {
 
   begin(): () => void {
     const restore = this.preserve();
+    this.applyPrerollOverride();
+    return restore;
+  }
+
+  beginAttachment(): () => void {
+    const restore = this.preserve();
+    this.video.muted = true;
+    if (this.video.style) this.video.style.opacity = "0";
+    return restore;
+  }
+
+  beginPreroll(): () => void {
+    if (!this.active) return this.begin();
+    this.applyPrerollOverride();
+    return () => undefined;
+  }
+
+  private applyPrerollOverride(): void {
     this.video.muted = true;
     if (this.video.style) this.video.style.opacity = "0";
     this.video.playbackRate = 16;
     this.video.autoplay = true;
-    return restore;
   }
 
   restore(): void {

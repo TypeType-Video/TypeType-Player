@@ -373,66 +373,75 @@ import type {
     finalizePausedSeek = false,
     allowWindowRecovery = true,
   ): Promise<LoadedSession> {
+    let attachmentStateActive = false;
     const quiesce = async () => {
       await this.deps.loop.quiesce();
       this.operation.ensureCurrent(this.destroyed, revision);
+      if (quality && !attachmentStateActive) {
+        this.transientMediaState.beginAttachment();
+        attachmentStateActive = true;
+      }
     };
     if (!quality) await quiesce();
-    const load = allowWindowRecovery ? loadPlayerSession : loadPlayerSessionOnce;
-    const session = await load({
-      deps: this.deps,
-      config: { ...this.config, audioOnly },
-      video: this.video,
-      response,
-      current: this.session,
-      quality,
-      startTimeMs,
-      signal,
-      recovery: this.playbackRecovery,
-      ...(quality ? { beforeAttach: quiesce } : {}),
-    });
-    this.operation.ensureCurrent(this.destroyed, revision);
-    const resolvedStartTimeMs =
-      session.response.startTimeMs ?? session.manifest.startTimeMs ?? startTimeMs;
-    this.recoveryPositionMs = resolvedStartTimeMs;
-    const startMs = decodeStartMs(session.manifest, resolvedStartTimeMs);
-    if (shouldApplySessionPosition(resolvedStartTimeMs, finalizePausedSeek)) {
-      this.video.currentTime = startMs / 1000;
-    }
-    this.session = session;
-    await this.deps.loop.fillOnce();
-    this.operation.ensureCurrent(this.destroyed, revision);
-    if (resolvedStartTimeMs > startMs) {
-      if (this.playbackIntent.shouldResume) {
-        await this.runDecodePreroll(resolvedStartTimeMs, true, signal);
-        this.pendingPrerollTargetMs = null;
-      } else {
-        if (finalizePausedSeek) {
-          await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
+    try {
+      const load = allowWindowRecovery ? loadPlayerSession : loadPlayerSessionOnce;
+      const session = await load({
+        deps: this.deps,
+        config: { ...this.config, audioOnly },
+        video: this.video,
+        response,
+        current: this.session,
+        quality,
+        startTimeMs,
+        signal,
+        recovery: this.playbackRecovery,
+        ...(quality ? { beforeAttach: quiesce } : {}),
+      });
+      this.operation.ensureCurrent(this.destroyed, revision);
+      const resolvedStartTimeMs =
+        session.response.startTimeMs ?? session.manifest.startTimeMs ?? startTimeMs;
+      this.recoveryPositionMs = resolvedStartTimeMs;
+      const startMs = decodeStartMs(session.manifest, resolvedStartTimeMs);
+      if (shouldApplySessionPosition(resolvedStartTimeMs, finalizePausedSeek)) {
+        this.video.currentTime = startMs / 1000;
+      }
+      this.session = session;
+      await this.deps.loop.fillOnce();
+      this.operation.ensureCurrent(this.destroyed, revision);
+      if (resolvedStartTimeMs > startMs) {
+        if (this.playbackIntent.shouldResume) {
+          await this.runDecodePreroll(resolvedStartTimeMs, true, signal);
           this.pendingPrerollTargetMs = null;
         } else {
-          this.pendingPrerollTargetMs = resolvedStartTimeMs;
+          if (finalizePausedSeek) {
+            await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
+            this.pendingPrerollTargetMs = null;
+          } else {
+            this.pendingPrerollTargetMs = resolvedStartTimeMs;
+          }
         }
-      }
-    } else if (this.playbackIntent.shouldResume) {
-      this.pendingPrerollTargetMs = null;
-      if (resolvedStartTimeMs > 0) {
+      } else if (this.playbackIntent.shouldResume) {
+        this.pendingPrerollTargetMs = null;
+        if (resolvedStartTimeMs > 0) {
+          await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
+        }
+        await tryResumePlayback(this.video);
+      } else if (finalizePausedSeek && resolvedStartTimeMs > 0) {
         await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
+        this.pendingPrerollTargetMs = null;
+      } else {
+        this.pendingPrerollTargetMs = null;
       }
-      await tryResumePlayback(this.video);
-    } else if (finalizePausedSeek && resolvedStartTimeMs > 0) {
-      await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
-      this.pendingPrerollTargetMs = null;
-    } else {
-      this.pendingPrerollTargetMs = null;
+      this.operation.ensureCurrent(this.destroyed, revision);
+      this.playbackRecovery.complete(currentTimeMs(this.video));
+      this.liveEdgeFollower.initialize(currentTimeMs(this.video), session.manifest.live);
+      if (this.playbackLifecycleActive) this.deps.loop.start();
+      emitManifest(this.emitter, session.response, session);
+      this.playerState.set(this.video.paused ? "ready" : "playing");
+      return session;
+    } finally {
+      if (attachmentStateActive) this.transientMediaState.restore();
     }
-    this.operation.ensureCurrent(this.destroyed, revision);
-    this.playbackRecovery.complete(currentTimeMs(this.video));
-    this.liveEdgeFollower.initialize(currentTimeMs(this.video), session.manifest.live);
-    if (this.playbackLifecycleActive) this.deps.loop.start();
-    emitManifest(this.emitter, session.response, session);
-    this.playerState.set(this.video.paused ? "ready" : "playing");
-    return session;
   }
 
   /** Applies a bounded decode preroll using the player-owned media override. */

@@ -36,6 +36,27 @@ test("preserves media preferences across a source replacement", () => {
   expect(video.playbackRate).toBe(4);
 });
 
+test("keeps a source replacement hidden through decode preroll", () => {
+  const video = videoElement();
+  const state = new TransientMediaState(video);
+
+  const restoreAttachment = state.beginAttachment();
+  expect(video.style.opacity).toBe("0");
+  expect(video.playbackRate).toBe(1.25);
+
+  const finishPreroll = state.beginPreroll();
+  expect(video.playbackRate).toBe(16);
+  finishPreroll();
+  expect(state.active).toBe(true);
+  expect(video.style.opacity).toBe("0");
+
+  restoreAttachment();
+  expect(state.active).toBe(false);
+  expect(video.muted).toBe(false);
+  expect(video.style.opacity).toBe("0.75");
+  expect(video.playbackRate).toBe(1.25);
+});
+
 test("an obsolete owner cannot restore a newer override", () => {
   const video = videoElement();
   const state = new TransientMediaState(video);
