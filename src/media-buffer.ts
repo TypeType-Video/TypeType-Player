@@ -1,5 +1,6 @@
 const RANGE_TOLERANCE_SECONDS = 0.05;
 const MIN_SEEK_BUFFER_MS = 250;
+const RANGE_ENTRY_OFFSET_SECONDS = 0.001;
 
 export function bufferedEndAtCurrentTime(
   video: Pick<HTMLVideoElement, "buffered" | "currentTime">,
@@ -24,6 +25,15 @@ export function canSeekWithinBufferedMedia(
   const safeTargetMs = Math.max(0, Math.round(targetMs));
   const range = bufferedRangeAt(video.buffered, safeTargetMs / 1000);
   return range !== null && safeTargetMs <= range.end * 1000 - MIN_SEEK_BUFFER_MS;
+}
+
+export function alignPlayheadToBufferedRange(
+  video: Pick<HTMLVideoElement, "buffered" | "currentTime">,
+): boolean {
+  const range = bufferedRangeAt(video.buffered, video.currentTime);
+  if (!range || video.currentTime >= range.start || range.end <= range.start) return false;
+  video.currentTime = Math.min(range.start + RANGE_ENTRY_OFFSET_SECONDS, range.end);
+  return true;
 }
 
 export function bufferedRangeAt(ranges: TimeRanges, positionSeconds: number) {

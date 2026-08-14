@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { bufferedEndAtCurrentTime, seekWithinBufferedMedia } from "../src/media-buffer";
+import {
+  alignPlayheadToBufferedRange,
+  bufferedEndAtCurrentTime,
+  seekWithinBufferedMedia,
+} from "../src/media-buffer";
 
 test("uses the buffered range containing the playhead instead of the final range", () => {
   const video = media(
@@ -42,6 +46,20 @@ test("seeks locally only when the target has enough buffered media", () => {
   expect(video.currentTime).toBe(20);
   expect(seekWithinBufferedMedia(video, 45_000)).toBe(false);
   expect(seekWithinBufferedMedia(video, 89_900)).toBe(false);
+});
+
+test("moves a rounded playhead just inside a fractional buffer start", () => {
+  const video = media([[527.493633, 549.151927]], 527.493);
+
+  expect(alignPlayheadToBufferedRange(video)).toBe(true);
+  expect(video.currentTime).toBeCloseTo(527.494633, 6);
+});
+
+test("keeps a playhead that is already inside the buffered range", () => {
+  const video = media([[527.493633, 549.151927]], 527.5);
+
+  expect(alignPlayheadToBufferedRange(video)).toBe(false);
+  expect(video.currentTime).toBe(527.5);
 });
 
 function media(ranges: Array<[number, number]>, currentTime: number) {

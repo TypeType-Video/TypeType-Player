@@ -1,4 +1,5 @@
 import type { PlaybackManifest } from "./manifest";
+import { alignPlayheadToBufferedRange, bufferedRangeAt } from "./media-buffer";
 import { playMedia, tryResumePlayback } from "./media-playback";
 import { TransientMediaState } from "./transient-media-state";
 
@@ -9,13 +10,8 @@ const MIN_PREROLL_TIMEOUT_MS = 5_000;
 const MAX_PREROLL_TIMEOUT_MS = 15_000;
 const SNAP_TIMEOUT_MS = 2_000;
 const SNAP_TOLERANCE_MS = 20;
-
-class TargetSnapTimeoutError extends Error {
-  constructor() {
-    super("Seek target snap timed out");
-    this.name = "TargetSnapTimeoutError";
-  }
-}
+const DEFAULT_PREROLL_RATE = 16;
+const WEBKIT_PREROLL_RATE = 1;
 
 export function decodeStartMs(manifest: PlaybackManifest, targetMs: number): number {
   if (!manifest.video) return targetMs;
@@ -53,37 +49,19 @@ export async function runDecodePreroll(
     }
     return;
   }
-  const decodeStartSeconds = video.currentTime;
-  if (!requiresDecodePreroll(video)) {
-    try {
-      const resumeAttempted = await snapToTarget(video, targetMs, signal, resumePlayback);
-      if (resumePlayback) {
-        if (!resumeAttempted && video.paused) await tryResumePlayback(video, signal);
-      } else {
-        video.pause();
-      }
-      ensureNotAborted(signal);
-      return;
-    } catch (error) {
-      if (!(error instanceof TargetSnapTimeoutError)) throw error;
-      video.pause();
-      video.currentTime = decodeStartSeconds;
-    }
-  }
-  const restoreMediaState = transientState.beginPreroll();
-  let pausedForSnap = false;
+  const restoreMediaState = transientState.beginPreroll(prerollRate(video));
+  let pausedAtTarget = false;
   try {
-    await playMedia(video, signal);
     await waitForTarget(video, targetMs, signal);
     if (!resumePlayback) {
       video.pause();
-      pausedForSnap = true;
-      await snapToTarget(video, targetMs, signal);
+      pausedAtTarget = true;
+      ensureNotAborted(signal);
     }
   } finally {
     restoreMediaState();
     if (!resumePlayback) {
-      if (!pausedForSnap) video.pause();
+      if (!pausedAtTarget) video.pause();
     } else if (!signal.aborted && video.paused) {
       await tryResumePlayback(video, signal);
       ensureNotAborted(signal);
@@ -91,9 +69,11 @@ export async function runDecodePreroll(
   }
 }
 
-function requiresDecodePreroll(video: HTMLVideoElement): boolean {
+function prerollRate(video: HTMLVideoElement): number {
   const webkitVideo = video as HTMLVideoElement & { webkitSupportsFullscreen?: boolean };
-  return typeof webkitVideo.webkitSupportsFullscreen === "boolean";
+  return typeof webkitVideo.webkitSupportsFullscreen === "boolean"
+    ? WEBKIT_PREROLL_RATE
+    : DEFAULT_PREROLL_RATE;
 }
 
 async function snapToTarget(
@@ -123,7 +103,7 @@ async function snapToTarget(
         return resolve(resumeAttempted);
       }
       if (performance.now() - startedAt >= SNAP_TIMEOUT_MS)
-        return reject(new TargetSnapTimeoutError());
+        return reject(new Error("Seek target snap timed out"));
       setTimeout(poll, 10);
     };
     poll();
@@ -134,26 +114,35 @@ function ensureNotAborted(signal: AbortSignal): void {
   if (signal.aborted) throw new DOMException("Operation aborted", "AbortError");
 }
 
-function waitForTarget(
+async function waitForTarget(
   video: HTMLVideoElement,
   targetMs: number,
   signal: AbortSignal,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const decodeDistanceMs = Math.max(0, targetMs - video.currentTime * 1000);
-    const timeoutMs = Math.min(
-      MAX_PREROLL_TIMEOUT_MS,
-      Math.max(MIN_PREROLL_TIMEOUT_MS, decodeDistanceMs * 2),
-    );
-    const startedAt = performance.now();
-    const poll = () => {
-      if (signal.aborted) return reject(new DOMException("Operation aborted", "AbortError"));
-      if (video.error) return reject(new Error(video.error.message));
-      if (video.currentTime * 1000 >= targetMs - TARGET_TOLERANCE_MS) return resolve();
-      if (performance.now() - startedAt >= timeoutMs)
-        return reject(new Error("Decode preroll timed out"));
-      setTimeout(poll, 10);
-    };
-    poll();
-  });
+  const decodeDistanceMs = Math.max(0, targetMs - video.currentTime * 1000);
+  const timeoutMs = Math.min(
+    MAX_PREROLL_TIMEOUT_MS,
+    Math.max(MIN_PREROLL_TIMEOUT_MS, decodeDistanceMs * 2),
+  );
+  const startedAt = performance.now();
+  let playStarted = false;
+  while (true) {
+    ensureNotAborted(signal);
+    if (video.error) throw new Error(video.error.message);
+    alignPlayheadToBufferedRange(video);
+    const targetReached = video.currentTime * 1000 >= targetMs - TARGET_TOLERANCE_MS;
+    const bufferedAtPlayhead = bufferedRangeAt(video.buffered, video.currentTime) !== null;
+    if (video.readyState < HAVE_CURRENT_DATA && !targetReached && !bufferedAtPlayhead) {
+      if (performance.now() - startedAt >= timeoutMs) throw new Error("Decode preroll timed out");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      continue;
+    }
+    if (!playStarted || (video.paused && !video.seeking)) {
+      await playMedia(video, signal);
+      playStarted = true;
+    }
+    if (video.currentTime * 1000 >= targetMs - TARGET_TOLERANCE_MS) return;
+    if (performance.now() - startedAt >= timeoutMs) throw new Error("Decode preroll timed out");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }

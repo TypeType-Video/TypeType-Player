@@ -50,16 +50,20 @@ export class TransientMediaState {
     return restore;
   }
 
-  beginPreroll(): () => void {
-    if (!this.active) return this.begin();
-    this.applyPrerollOverride();
+  beginPreroll(playbackRate = 16): () => void {
+    if (!this.active) {
+      const restore = this.preserve();
+      this.applyPrerollOverride(playbackRate);
+      return restore;
+    }
+    this.applyPrerollOverride(playbackRate);
     return () => undefined;
   }
 
-  private applyPrerollOverride(): void {
+  private applyPrerollOverride(playbackRate = 16): void {
     this.video.muted = true;
     if (this.video.style) this.video.style.opacity = "0";
-    this.video.playbackRate = 16;
+    this.video.playbackRate = playbackRate;
     this.video.autoplay = true;
   }
 
