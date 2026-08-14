@@ -33,6 +33,7 @@ type LoadSessionArgs = {
   audioTrackId: string | null;
   audioOnly: boolean;
   startTimeMs: number;
+  playerTimeMs?: () => number;
   playbackRate?: (() => number) | undefined;
   policy: BufferPolicy;
   signal: AbortSignal;
@@ -40,15 +41,14 @@ type LoadSessionArgs = {
 };
 
 export async function loadPlaybackSession(args: LoadSessionArgs): Promise<LoadedSession> {
-  const startTimeMs = args.response.startTimeMs ?? args.startTimeMs;
-  const request = { ...createPlaybackWindowRequest(args, startTimeMs), bufferedRanges: [] };
+  const request = () => ({
+    ...createPlaybackWindowRequest(args, requestedStartTimeMs(args)),
+    bufferedRanges: [],
+  });
   const window = await waitForWindow(args, args.response.sessionId, request);
   if (!window.manifest) throw new Error("Playback window is not ready");
   const resolvedStartTimeMs =
-    window.startTimeMs ??
-    window.manifest.startTimeMs ??
-    args.response.startTimeMs ??
-    args.startTimeMs;
+    window.startTimeMs ?? window.manifest.startTimeMs ?? requestedStartTimeMs(args);
   const live = window.live ?? window.manifest.live ?? args.response.live ?? null;
   const response = {
     ...args.response,
@@ -58,6 +58,10 @@ export async function loadPlaybackSession(args: LoadSessionArgs): Promise<Loaded
   };
   const manifest = { ...window.manifest, startTimeMs: resolvedStartTimeMs, live };
   return attachSession(args, response, manifest);
+}
+
+function requestedStartTimeMs(args: LoadSessionArgs): number {
+  return args.playerTimeMs?.() ?? args.response.startTimeMs ?? args.startTimeMs;
 }
 
 async function attachSession(
@@ -116,9 +120,9 @@ export async function refreshPlaybackWindow(
 async function waitForWindow(
   args: Pick<LoadSessionArgs, "playback" | "policy" | "signal">,
   sessionId: string,
-  request: PlaybackWindowRequest,
+  request: () => PlaybackWindowRequest,
 ) {
-  return pollSegments(args, sessionId, () => request);
+  return pollSegments(args, sessionId, request);
 }
 
 async function pollSegments(

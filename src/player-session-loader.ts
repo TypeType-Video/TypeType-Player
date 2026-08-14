@@ -12,7 +12,7 @@ import type { TypeTypeMseConfig, TypeTypeMseQuality } from "./types";
 type Args = {
   deps: PlayerSessionDeps;
   config: TypeTypeMseConfig;
-  video: { currentTime: number };
+  video: { currentTime: number; paused?: boolean };
   response: LoadedSession["response"];
   current: LoadedSession | null;
   quality: TypeTypeMseQuality | undefined;
@@ -90,6 +90,11 @@ async function loadSelectedSession(
     playbackRate: args.deps.playbackRate,
     policy: args.deps.policy,
     signal: args.signal,
+    ...(args.quality && args.video.paused === false
+      ? {
+          playerTimeMs: () => Math.max(args.startTimeMs, Math.round(args.video.currentTime * 1000)),
+        }
+      : {}),
     ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {}),
   });
   const startTimeMs =
