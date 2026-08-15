@@ -568,7 +568,23 @@ import type {
       return;
     }
     const session = this.session;
-    const task = tryResumePlayback(this.video)
+    const recoveryTargetMs = lifecycleRecoveryTarget(
+      this.recoveryPositionMs,
+      currentTimeMs(this.video),
+      this.video.ended,
+    );
+    const resume =
+      recoveryTargetMs === null
+        ? tryResumePlayback(this.video)
+        : this.seekController
+            .seek(
+              recoveryTargetMs,
+              `lifecycle:${recoveryTargetMs}`,
+              (target) => this.performSeek(target),
+              () => this.operation.abort(),
+            )
+            .then(() => !this.video.paused);
+    const task = resume
       .then((resumed) => {
         if (
           !resumed ||
@@ -653,6 +669,15 @@ import type {
     );
     return result;
   }
+}
+
+function lifecycleRecoveryTarget(
+  recoveryPositionMs: number,
+  currentPositionMs: number,
+  ended: boolean,
+): number | null {
+  if (ended || recoveryPositionMs < 2_000) return null;
+  return currentPositionMs + 2_000 < recoveryPositionMs ? recoveryPositionMs : null;
 }
 
 function isAbortError(error: unknown): boolean {
