@@ -53,10 +53,16 @@ export async function runDecodePreroll(
   let pausedAtTarget = false;
   try {
     await waitForTarget(video, targetMs, signal);
+    const distanceMs = Math.abs(video.currentTime * 1000 - targetMs);
     if (!resumePlayback) {
       video.pause();
       pausedAtTarget = true;
       ensureNotAborted(signal);
+      if (distanceMs > TARGET_TOLERANCE_MS) {
+        await snapToTarget(video, targetMs, signal);
+      }
+    } else if (distanceMs > TARGET_TOLERANCE_MS) {
+      await snapToTarget(video, targetMs, signal, true);
     }
   } finally {
     restoreMediaState();
