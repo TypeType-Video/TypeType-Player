@@ -34,12 +34,13 @@
     "clean": "bun --eval 'import { rmSync } from \"node:fs\"; rmSync(\"dist\", { recursive: true, force: true })'",
     "format": "biome format --write .",
     "test": "bun test",
+    "test:consumer": "tsc --project tests/consumer/tsconfig.json",
     "test:coverage": "bun test --coverage --coverage-reporter=lcov",
     "prepack": "bun run build",
     "publish:jsr": "deno publish"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.7",
+    "@biomejs/biome": "^2.5.10",
     "typescript": "~7.0.2"
   },
   "publishConfig": {

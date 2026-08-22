@@ -35,6 +35,7 @@ jobs:
       - run: bun run check:jsr
       - run: bun run test:coverage
       - run: bun run build
+      - run: bun run test:consumer
       - run: node --input-type=module --eval 'const mod = await import("./dist/index.js"); if (typeof mod.TypeTypeMsePlayer !== "function") process.exit(1)'
 
   dependency-review:
