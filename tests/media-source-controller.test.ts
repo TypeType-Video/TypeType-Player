@@ -38,6 +38,7 @@ function videoElement(src: string) {
     calls,
     video: {
       src,
+      pause: () => calls.push("pause"),
       removeAttribute: (name: string) => calls.push(`remove:${name}`),
       load: () => calls.push("load"),
     } as unknown as HTMLVideoElement,
@@ -51,7 +52,7 @@ test("detach releases the media source owned by the controller", () => {
 
   controller.detach();
 
-  expect(calls).toEqual(["remove:src", "load"]);
+  expect(calls).toEqual(["pause", "remove:src", "load"]);
 });
 
 test("stale controller cannot detach a replacement media source", () => {
@@ -143,16 +144,16 @@ test("attach releases each old layout before repeated track changes", async () =
   state.audioMime = manifest(true).audio.mime;
   state.videoMime = manifest(true).video?.mime ?? null;
 
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 24; index += 1) {
     await controller.attach(manifest(index % 2 !== 0));
   }
 
-  expect(replacements).toHaveLength(6);
+  expect(replacements).toHaveLength(24);
   expect(current.removed).toHaveLength(2);
   for (const replacement of replacements.slice(0, -1)) {
     expect(replacement.removed.length).toBeGreaterThan(0);
   }
-  expect(video.src).toBe("blob:replacement-6");
+  expect(video.src).toBe("blob:replacement-24");
 });
 
 test("ManagedMediaSource disables remote playback only while attached", async () => {

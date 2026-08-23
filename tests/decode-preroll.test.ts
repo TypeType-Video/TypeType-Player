@@ -242,7 +242,7 @@ test("decodes to the target before resuming", async () => {
   expect(plays).toBe(1);
 });
 
-test("keeps the naturally decoded frame for a paused preroll", async () => {
+test("snaps a naturally decoded paused frame to the exact target", async () => {
   let currentTime = 24.791;
   let currentTimeWrites = 0;
   let pauses = 0;
@@ -270,7 +270,7 @@ test("keeps the naturally decoded frame for a paused preroll", async () => {
 
   await runDecodePreroll(video, 30_298, false, new AbortController().signal);
 
-  expect(currentTimeWrites).toBe(0);
+  expect(currentTimeWrites).toBe(1);
   expect(pauses).toBe(1);
-  expect(video.currentTime).toBe(30.23);
+  expect(video.currentTime).toBe(30.298);
 });

@@ -119,5 +119,5 @@ test("recovers a 4x seek window without changing the selected video itag", async
   expect(requests.map((request) => request.bufferGoalMs)).toEqual([
     60_000, 60_000, 60_000, 60_000, 60_000,
   ]);
-  expect(filledWindows).toEqual([[120_000, 59_000, 120_000]]);
+  expect(filledWindows).toEqual([[120_000, 59_000, 76_000]]);
 });

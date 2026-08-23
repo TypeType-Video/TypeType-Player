@@ -9,6 +9,8 @@ import {
 } from "./session-loader";
 import type { TypeTypeMseConfig, TypeTypeMseQuality } from "./types";
 
+const STARTUP_BUFFER_MS = 4_000;
+
 type Args = {
   deps: PlayerSessionDeps;
   config: TypeTypeMseConfig;
@@ -100,11 +102,15 @@ async function loadSelectedSession(
   const startTimeMs =
     session.response.startTimeMs ?? session.manifest.startTimeMs ?? requestedStartTimeMs;
   const fillStartMs = decodeStartMs(session.manifest, startTimeMs);
+  const playbackRate = args.deps.playbackRate?.() ?? 1;
   await args.deps.scheduler.fill(
     session.manifest,
     fillStartMs,
     startTimeMs +
-      rateAwareBufferGoalMs(args.deps.policy.bufferGoalMs, args.deps.playbackRate?.() ?? 1),
+      Math.min(
+        rateAwareBufferGoalMs(STARTUP_BUFFER_MS, playbackRate),
+        rateAwareBufferGoalMs(args.deps.policy.bufferGoalMs, playbackRate),
+      ),
     args.signal,
   );
   if (args.signal.aborted) throw new DOMException("Operation aborted", "AbortError");

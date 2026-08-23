@@ -112,7 +112,7 @@ test("uses the server-resolved live start for the first window and buffer fill",
 
   expect(requestedPositions).toEqual([60_000]);
   expect(requestedSelections).toEqual([[248, 251, "fr-FR.4"]]);
-  expect(filledWindows).toEqual([[59_000, 90_000]]);
+  expect(filledWindows).toEqual([[59_000, 64_000]]);
   expect(session.response.startTimeMs).toBe(60_000);
   expect(session.manifest.live?.active).toBe(true);
 });

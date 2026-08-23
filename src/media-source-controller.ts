@@ -158,6 +158,7 @@ export class MediaSourceController {
     this.mediaSource = null;
     this.timing.reset();
     if (ownsMediaElement) {
+      this.video.pause();
       this.video.removeAttribute("src");
       this.video.load();
     }

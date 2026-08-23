@@ -10,6 +10,7 @@ const MIN_PREROLL_TIMEOUT_MS = 5_000;
 const MAX_PREROLL_TIMEOUT_MS = 15_000;
 const SNAP_TIMEOUT_MS = 2_000;
 const SNAP_TOLERANCE_MS = 20;
+const PAUSED_SNAP_THRESHOLD_MS = 1;
 const DEFAULT_PREROLL_RATE = 16;
 const WEBKIT_PREROLL_RATE = 1;
 
@@ -37,7 +38,7 @@ export async function runDecodePreroll(
   const targetReached = video.currentTime * 1000 >= targetMs - TARGET_TOLERANCE_MS;
   if (targetReached && (!requireFrame || video.readyState >= HAVE_CURRENT_DATA)) {
     const distanceMs = Math.abs(video.currentTime * 1000 - targetMs);
-    const exact = distanceMs <= SNAP_TOLERANCE_MS;
+    const exact = distanceMs <= (resumePlayback ? SNAP_TOLERANCE_MS : PAUSED_SNAP_THRESHOLD_MS);
     const resumeWithinTolerance = resumePlayback && distanceMs <= TARGET_TOLERANCE_MS;
     let resumeAttempted = false;
     if (!exact && !resumeWithinTolerance) {
@@ -58,11 +59,13 @@ export async function runDecodePreroll(
       video.pause();
       pausedAtTarget = true;
       ensureNotAborted(signal);
-      if (distanceMs > TARGET_TOLERANCE_MS) {
+      if (distanceMs > PAUSED_SNAP_THRESHOLD_MS) {
         await snapToTarget(video, targetMs, signal);
       }
     } else if (distanceMs > TARGET_TOLERANCE_MS) {
-      await snapToTarget(video, targetMs, signal, true);
+      video.pause();
+      ensureNotAborted(signal);
+      await snapToTarget(video, targetMs, signal);
     }
   } finally {
     restoreMediaState();

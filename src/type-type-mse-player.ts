@@ -382,12 +382,14 @@ import type {
   ): Promise<LoadedSession> {
     let attachmentStateActive = false;
     const quiesce = async () => {
-      await this.deps.loop.quiesce();
-      this.operation.ensureCurrent(this.destroyed, revision);
       if (quality && !attachmentStateActive) {
+        this.deps.loop.stop();
+        this.video.pause();
         this.transientMediaState.beginAttachment();
         attachmentStateActive = true;
       }
+      await this.deps.loop.quiesce();
+      this.operation.ensureCurrent(this.destroyed, revision);
     };
     if (!quality) await quiesce();
     try {
@@ -413,8 +415,6 @@ import type {
         this.video.currentTime = startMs / 1000;
       }
       this.session = session;
-      await this.deps.loop.fillOnce();
-      this.operation.ensureCurrent(this.destroyed, revision);
       alignPlayheadToBufferedRange(this.video);
       if (resolvedStartTimeMs > startMs) {
         if (this.playbackIntent.shouldResume) {
@@ -444,7 +444,10 @@ import type {
       this.operation.ensureCurrent(this.destroyed, revision);
       this.playbackRecovery.complete(currentTimeMs(this.video));
       this.liveEdgeFollower.initialize(currentTimeMs(this.video), session.manifest.live);
-      if (this.playbackLifecycleActive) this.deps.loop.start();
+      if (this.playbackLifecycleActive) {
+        this.deps.loop.start();
+        this.deps.loop.wake();
+      }
       emitManifest(this.emitter, session.response, session);
       this.playerState.set(this.video.paused ? "ready" : "playing");
       return session;

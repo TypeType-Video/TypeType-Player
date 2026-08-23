@@ -73,13 +73,18 @@ async function attachSession(
   ensureNotAborted(args.signal);
   await args.beforeAttach?.();
   ensureNotAborted(args.signal);
+  const handoffStartTimeMs = args.playerTimeMs?.();
+  const attachedResponse =
+    handoffStartTimeMs === undefined ? response : { ...response, startTimeMs: handoffStartTimeMs };
+  const attachedManifest =
+    handoffStartTimeMs === undefined ? manifest : { ...manifest, startTimeMs: handoffStartTimeMs };
   args.scheduler.reset();
-  await args.media.attach(manifest);
+  await args.media.attach(attachedManifest);
   ensureNotAborted(args.signal);
-  await args.scheduler.appendInit(manifest, args.signal);
+  await args.scheduler.appendInit(attachedManifest, args.signal);
   return {
-    response,
-    manifest,
+    response: attachedResponse,
+    manifest: attachedManifest,
     videoItag: args.videoItag,
     audioItag: args.audioItag,
     audioTrackId: args.audioTrackId,

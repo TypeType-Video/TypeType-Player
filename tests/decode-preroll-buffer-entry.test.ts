@@ -44,9 +44,9 @@ test("enters a fractional buffered range before decoding", async () => {
 
   await runDecodePreroll(video, 529_972, false, new AbortController().signal, true);
 
-  expect(writes).toBe(1);
+  expect(writes).toBe(2);
   expect(plays).toBe(1);
-  expect(video.currentTime).toBeCloseTo(529.95, 2);
+  expect(video.currentTime).toBeCloseTo(529.972, 3);
   expect(video.paused).toBe(true);
 });
 
