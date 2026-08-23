@@ -76,7 +76,7 @@ test("snaps a paused target within the playback tolerance", async () => {
     },
     play: async () => {
       paused = false;
-      currentTime = 0.982;
+      currentTime = 1.024;
     },
   } as unknown as HTMLVideoElement;
 

@@ -42,7 +42,13 @@ export async function runDecodePreroll(
     const resumeWithinTolerance = resumePlayback && distanceMs <= TARGET_TOLERANCE_MS;
     let resumeAttempted = false;
     if (!exact && !resumeWithinTolerance) {
-      resumeAttempted = await snapToTarget(video, targetMs, signal, resumePlayback);
+      resumeAttempted = await snapToTarget(
+        video,
+        targetMs,
+        signal,
+        resumePlayback,
+        resumePlayback ? SNAP_TOLERANCE_MS : PAUSED_SNAP_THRESHOLD_MS,
+      );
     }
     if (resumePlayback && !resumeAttempted && video.paused) {
       await tryResumePlayback(video, signal);
@@ -60,12 +66,12 @@ export async function runDecodePreroll(
       pausedAtTarget = true;
       ensureNotAborted(signal);
       if (distanceMs > PAUSED_SNAP_THRESHOLD_MS) {
-        await snapToTarget(video, targetMs, signal);
+        await snapToTarget(video, targetMs, signal, false, PAUSED_SNAP_THRESHOLD_MS);
       }
     } else if (distanceMs > TARGET_TOLERANCE_MS) {
       video.pause();
       ensureNotAborted(signal);
-      await snapToTarget(video, targetMs, signal);
+      await snapToTarget(video, targetMs, signal, false, PAUSED_SNAP_THRESHOLD_MS);
     }
   } finally {
     restoreMediaState();
@@ -90,9 +96,10 @@ async function snapToTarget(
   targetMs: number,
   signal: AbortSignal,
   resumePlayback = false,
+  toleranceMs = SNAP_TOLERANCE_MS,
 ): Promise<boolean> {
   ensureNotAborted(signal);
-  const exact = Math.abs(video.currentTime * 1000 - targetMs) <= SNAP_TOLERANCE_MS;
+  const exact = Math.abs(video.currentTime * 1000 - targetMs) <= toleranceMs;
   if (exact && !video.seeking && video.readyState >= HAVE_CURRENT_DATA) return false;
   if (resumePlayback && !video.paused) video.pause();
   video.currentTime = targetMs / 1000;
@@ -107,7 +114,7 @@ async function snapToTarget(
     const poll = () => {
       if (signal.aborted) return reject(new DOMException("Operation aborted", "AbortError"));
       if (video.error) return reject(new Error(video.error.message));
-      const exact = Math.abs(video.currentTime * 1000 - targetMs) <= SNAP_TOLERANCE_MS;
+      const exact = Math.abs(video.currentTime * 1000 - targetMs) <= toleranceMs;
       if (exact && !video.seeking && video.readyState >= HAVE_CURRENT_DATA) {
         return resolve(resumeAttempted);
       }
