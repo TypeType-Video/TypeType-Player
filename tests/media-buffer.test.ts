@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   alignPlayheadToBufferedRange,
   bufferedEndAtCurrentTime,
+  canUseBufferedMediaSeek,
   seekWithinBufferedMedia,
 } from "../src/media-buffer";
 
@@ -46,6 +47,15 @@ test("seeks locally only when the target has enough buffered media", () => {
   expect(video.currentTime).toBe(20);
   expect(seekWithinBufferedMedia(video, 45_000)).toBe(false);
   expect(seekWithinBufferedMedia(video, 89_900)).toBe(false);
+});
+
+test("uses the server seek path for WebKit media", () => {
+  const video = Object.assign(media([[0, 30]], 5), {
+    webkitSupportsFullscreen: false,
+  });
+
+  expect(canUseBufferedMediaSeek(video, 20_000)).toBe(false);
+  expect(canUseBufferedMediaSeek(media([[0, 30]], 5), 20_000)).toBe(true);
 });
 
 test("moves a rounded playhead just inside a fractional buffer start", () => {

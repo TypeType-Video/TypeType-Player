@@ -3,7 +3,7 @@ import { decodeStartMs, runDecodePreroll } from "./decode-preroll";
 import { EventEmitter } from "./event-emitter";
 import { LiveEdgeFollower } from "./live-edge-follower";
 import { skipBufferedLiveGap } from "./live-media-gap";
-import { alignPlayheadToBufferedRange, canSeekWithinBufferedMedia } from "./media-buffer";
+import { alignPlayheadToBufferedRange, canUseBufferedMediaSeek } from "./media-buffer";
 import { playMedia, tryResumePlayback } from "./media-playback";
 import { PlaybackIntent } from "./playback-intent";
 import {
@@ -190,7 +190,7 @@ import type {
       this.session &&
       this.playerState.value !== "loading" &&
       this.playerState.value !== "seeking" &&
-      canSeekWithinBufferedMedia(this.video, targetMs)
+      canUseBufferedMediaSeek(this.video, targetMs)
     ) {
       const completion = this.bufferedSeekRecovery.arm(
         this.video,

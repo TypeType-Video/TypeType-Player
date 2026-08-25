@@ -27,6 +27,16 @@ export function canSeekWithinBufferedMedia(
   return range !== null && safeTargetMs <= range.end * 1000 - MIN_SEEK_BUFFER_MS;
 }
 
+export function canUseBufferedMediaSeek(
+  video: Pick<HTMLVideoElement, "buffered"> & { webkitSupportsFullscreen?: boolean },
+  targetMs: number,
+): boolean {
+  return (
+    typeof video.webkitSupportsFullscreen !== "boolean" &&
+    canSeekWithinBufferedMedia(video, targetMs)
+  );
+}
+
 export function alignPlayheadToBufferedRange(
   video: Pick<HTMLVideoElement, "buffered" | "currentTime">,
 ): boolean {
