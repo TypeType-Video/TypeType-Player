@@ -35,6 +35,7 @@ type LoadSessionArgs = {
   startTimeMs: number;
   playerTimeMs?: () => number;
   playbackRate?: (() => number) | undefined;
+  bufferGoalMs?: number;
   policy: BufferPolicy;
   signal: AbortSignal;
   beforeAttach?: () => Promise<void>;

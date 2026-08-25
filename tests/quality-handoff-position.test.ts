@@ -84,7 +84,7 @@ test("uses the exact playing handoff position for a quality replacement", async 
 
   expect(session.response.startTimeMs).toBe(22_375);
   expect(session.manifest.startTimeMs).toBe(22_375);
-  expect(filledWindows).toEqual([[19_000, 26_375]]);
+  expect(filledWindows).toEqual([[19_000, 24_875]]);
 });
 
 function response(): PlaybackResponse {

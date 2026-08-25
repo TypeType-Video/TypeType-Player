@@ -9,7 +9,7 @@ test("uses TypeType tuned defaults", () => {
     audioItag: 140,
     audioTrackId: null,
   });
-  expect(policy.bufferGoalMs).toBe(30_000);
+  expect(policy.bufferGoalMs).toBe(10_000);
   expect(policy.backBufferMs).toBe(30_000);
   expect(policy.pollIntervalMs).toBe(500);
   expect(policy.manifestRefreshMs).toBe(8_000);
@@ -31,7 +31,7 @@ test("rejects invalid buffer values", () => {
     manifestPollLimit: 0,
     segmentPollLimit: 7,
   });
-  expect(policy.bufferGoalMs).toBe(30_000);
+  expect(policy.bufferGoalMs).toBe(10_000);
   expect(policy.backBufferMs).toBe(30_000);
   expect(policy.pollIntervalMs).toBe(500);
   expect(policy.manifestRefreshMs).toBe(1_500);

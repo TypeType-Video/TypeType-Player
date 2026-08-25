@@ -12,7 +12,7 @@ export type BufferPolicy = {
 export function resolveBufferPolicy(config: TypeTypeMseConfig): BufferPolicy {
   const live = config.isLive === true;
   return {
-    bufferGoalMs: positive(config.bufferGoalMs, live ? 8_000 : 30_000),
+    bufferGoalMs: positive(config.bufferGoalMs, live ? 8_000 : 10_000),
     backBufferMs: positive(config.backBufferMs, 30_000),
     pollIntervalMs: positive(config.pollIntervalMs, live ? 250 : 500),
     manifestRefreshMs: positive(config.manifestRefreshMs, live ? 1_000 : 8_000),

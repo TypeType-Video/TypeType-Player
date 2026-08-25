@@ -37,6 +37,7 @@ function response(sessionId: string, videoId = "V_YKnVyUJgQ"): PlaybackResponse 
 
 test("uses the server-resolved live start for the first window and buffer fill", async () => {
   const requestedPositions: number[] = [];
+  const requestedBufferGoals: number[] = [];
   const requestedSelections: Array<[number, number, string | null]> = [];
   const filledWindows: Array<[number, number]> = [];
   const live = {
@@ -55,6 +56,7 @@ test("uses the server-resolved live start for the first window and buffer fill",
         create: async () => response("unused"),
         position: async (sessionId, request) => {
           requestedPositions.push(request.playerTimeMs);
+          requestedBufferGoals.push(request.bufferGoalMs);
           requestedSelections.push([request.videoItag, request.audioItag, request.audioTrackId]);
           return { ...window(sessionId, request.generation, false), startTimeMs: 60_000, live };
         },
@@ -111,8 +113,9 @@ test("uses the server-resolved live start for the first window and buffer fill",
   });
 
   expect(requestedPositions).toEqual([60_000]);
+  expect(requestedBufferGoals).toEqual([2_500]);
   expect(requestedSelections).toEqual([[248, 251, "fr-FR.4"]]);
-  expect(filledWindows).toEqual([[59_000, 64_000]]);
+  expect(filledWindows).toEqual([[59_000, 62_500]]);
   expect(session.response.startTimeMs).toBe(60_000);
   expect(session.manifest.live?.active).toBe(true);
 });

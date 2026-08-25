@@ -9,7 +9,7 @@ import {
 } from "./session-loader";
 import type { TypeTypeMseConfig, TypeTypeMseQuality } from "./types";
 
-const STARTUP_BUFFER_MS = 4_000;
+const STARTUP_BUFFER_MS = 2_500;
 
 type Args = {
   deps: PlayerSessionDeps;
@@ -90,6 +90,7 @@ async function loadSelectedSession(
     audioOnly: args.config.audioOnly === true,
     startTimeMs: requestedStartTimeMs,
     playbackRate: args.deps.playbackRate,
+    bufferGoalMs: Math.min(STARTUP_BUFFER_MS, args.deps.policy.bufferGoalMs),
     policy: args.deps.policy,
     signal: args.signal,
     ...(args.quality && args.video.paused === false

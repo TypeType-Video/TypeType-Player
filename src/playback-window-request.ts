@@ -11,6 +11,7 @@ type Args = {
   audioTrackId: string | null;
   audioOnly: boolean;
   playbackRate?: (() => number) | undefined;
+  bufferGoalMs?: number;
   policy: BufferPolicy;
   media: Pick<MediaSourceController, "bufferedRanges">;
 };
@@ -28,7 +29,10 @@ export function createPlaybackWindowRequest(
     audioTrackId: args.audioTrackId,
     audioOnly: args.audioOnly,
     playbackRate,
-    bufferGoalMs: rateAwareBufferGoalMs(args.policy.bufferGoalMs, playbackRate),
+    bufferGoalMs: rateAwareBufferGoalMs(
+      args.bufferGoalMs ?? args.policy.bufferGoalMs,
+      playbackRate,
+    ),
     backBufferMs: args.policy.backBufferMs,
     bufferedRanges: args.media.bufferedRanges().map((range) => ({
       itag: range.kind === "audio" ? args.audioItag : args.videoItag,
