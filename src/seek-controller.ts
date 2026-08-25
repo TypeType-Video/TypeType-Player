@@ -1,5 +1,7 @@
 export type SeekExecutor = (positionMs: number) => Promise<void>;
 
+const SUPERSEDED_SEEK_SETTLE_MS = 50;
+
 type SeekRequest = {
   key: string;
   positionMs: number;
@@ -10,6 +12,7 @@ export class SeekController {
   private requested: SeekRequest | null = null;
   private activeKey: string | null = null;
   private running: Promise<void> | null = null;
+  private revision = 0;
 
   seek(positionMs: number, key: string, execute: SeekExecutor, cancel: () => void): Promise<void> {
     if (
@@ -18,6 +21,7 @@ export class SeekController {
     ) {
       return this.running;
     }
+    this.revision += 1;
     this.requested = { key, positionMs: Math.max(0, Math.round(positionMs)), execute };
     if (this.activeKey !== null) cancel();
     if (!this.running) this.running = this.drain().finally(() => (this.running = null));
@@ -25,6 +29,7 @@ export class SeekController {
   }
 
   reset(): void {
+    this.revision += 1;
     this.requested = null;
   }
 
@@ -40,6 +45,15 @@ export class SeekController {
       } finally {
         this.activeKey = null;
       }
+      if (this.requested !== null) await this.waitForStableRequest();
+    }
+  }
+
+  private async waitForStableRequest(): Promise<void> {
+    while (this.requested !== null) {
+      const revision = this.revision;
+      await new Promise((resolve) => setTimeout(resolve, SUPERSEDED_SEEK_SETTLE_MS));
+      if (revision === this.revision) return;
     }
   }
 }

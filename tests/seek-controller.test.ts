@@ -26,6 +26,40 @@ test("coalesces seeks to the latest pending position", async () => {
   expect(positions).toEqual([10, 30]);
 });
 
+test("waits for a rapid replacement burst to settle", async () => {
+  const controller = new SeekController();
+  const executions: number[] = [];
+  let release: (() => void) | null = null;
+  const first = controller.seek(
+    10,
+    "seek:10",
+    async (position) => {
+      executions.push(position);
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    },
+    () => undefined,
+  );
+
+  for (let position = 20; position <= 80; position += 10) {
+    controller.seek(
+      position,
+      `seek:${position}`,
+      async (target) => {
+        executions.push(target);
+      },
+      () => undefined,
+    );
+    await Bun.sleep(10);
+  }
+  if (!release) throw new Error("Initial seek did not start");
+  release();
+  await first;
+
+  expect(executions).toEqual([10, 80]);
+});
+
 test("continues to the latest seek after an abort", async () => {
   const controller = new SeekController();
   const positions: number[] = [];
