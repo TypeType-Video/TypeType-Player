@@ -19,11 +19,14 @@ export function decodeStartMs(manifest: PlaybackManifest, targetMs: number): num
   const audio = manifest.audio.segments.find(
     (item) => item.startMs <= targetMs && item.startMs + item.durationMs > targetMs,
   );
-  if (audio && Math.abs(audio.startMs - targetMs) <= TARGET_BOUNDARY_TOLERANCE_MS) return targetMs;
   const video = manifest.video.segments.find(
     (item) => item.startMs <= targetMs && item.startMs + item.durationMs > targetMs,
   );
-  return video?.startMs ?? targetMs;
+  if (!audio || !video) return targetMs;
+  const sharedStartMs = Math.max(audio.startMs, video.startMs);
+  return Math.abs(sharedStartMs - targetMs) <= TARGET_BOUNDARY_TOLERANCE_MS
+    ? targetMs
+    : sharedStartMs;
 }
 
 export async function runDecodePreroll(

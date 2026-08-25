@@ -31,8 +31,25 @@ const manifest: PlaybackManifest = {
   },
 };
 
-test("starts audiovisual decode from the video sync segment", () => {
-  expect(decodeStartMs(manifest, 401_200)).toBe(398_360);
+test("starts audiovisual decode where both tracks cover the playhead", () => {
+  expect(decodeStartMs(manifest, 401_200)).toBe(399_383);
+});
+
+test("does not preroll into an audio gap before a resumed position", () => {
+  const resumed = {
+    ...manifest,
+    audio: {
+      ...manifest.audio,
+      segments: [{ url: "/140/11", startMs: 99_846, durationMs: 9_984 }],
+    },
+    video: {
+      kind: "video" as const,
+      mime: 'video/mp4; codecs="avc1.640028"',
+      initUrl: "/137/init",
+      segments: [{ url: "/137/16", startMs: 95_000, durationMs: 7_000 }],
+    },
+  };
+  expect(decodeStartMs(resumed, 100_000)).toBe(99_846);
 });
 
 test("starts directly on an exact audio fragment boundary", () => {
