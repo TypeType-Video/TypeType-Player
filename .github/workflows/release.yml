@@ -92,7 +92,7 @@ jobs:
 
   publish-jsr:
     if: (github.event_name == 'push' && startsWith(github.ref_name, 'v')) || inputs.registry == 'jsr' || inputs.registry == 'both'
-    runs-on: [self-hosted, Linux, X64, arko, typetype]
+    runs-on: [self-hosted, Linux, X64, r730, typetype]
     timeout-minutes: 15
     environment: jsr
     permissions:
