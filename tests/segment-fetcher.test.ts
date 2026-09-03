@@ -46,3 +46,26 @@ test("turns an expired segment into fresh session recovery", async () => {
   expect(error).toBeInstanceOf(PlaybackWindowRecoveryError);
   expect(error).toMatchObject({ recoveryAction: "retry_fresh_session" });
 });
+
+test("turns a segment poll timeout into fresh session recovery", async () => {
+  globalThis.fetch = () =>
+    Promise.resolve(
+      new Response(JSON.stringify({ retryAfterMs: 0 }), {
+        status: 202,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+  const request = fetchSegmentBytes(
+    new HttpClient({ endpoint: "https://example.com/api" }),
+    "https://example.com/segment",
+    1,
+  );
+  const error = await request.catch((reason: unknown) => reason);
+
+  expect(error).toBeInstanceOf(PlaybackWindowRecoveryError);
+  expect(error).toMatchObject({
+    message: "SABR segment was not ready in time",
+    recoveryAction: "retry_fresh_session",
+  });
+});
