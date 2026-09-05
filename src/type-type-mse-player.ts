@@ -457,12 +457,13 @@ import type {
   }
 
   /** Applies a bounded decode preroll using the player-owned media override. */
-  private runDecodePreroll(
+  private async runDecodePreroll(
     targetMs: number,
     resumePlayback: boolean,
     signal: AbortSignal,
     requireFrame = false,
   ): Promise<void> {
+    await this.deps.loop.fillOnce();
     return runDecodePreroll(
       this.video,
       targetMs,
