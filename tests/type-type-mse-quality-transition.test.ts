@@ -21,6 +21,7 @@ type QualityHarness = {
   playerState: { value: TypeTypeMseState; set: (state: TypeTypeMseState) => void };
   deps: {
     loop: { stop: () => void; start: () => void; quiesce: () => Promise<void> };
+    media: { requireFreshAttachment: () => void };
     playback: {
       seek: (
         sessionId: string,
@@ -77,6 +78,22 @@ test("stops the active playback loop before a timeline seek", async () => {
   expect(events).toEqual(["stop", "quiesce", "pause", "seek"]);
 });
 
+test("requires a fresh media attachment for WebKit timeline seeks", async () => {
+  let freshAttachments = 0;
+  const player = harness(
+    async () => response(),
+    () => undefined,
+  );
+  player.video.webkitSupportsFullscreen = true;
+  player.deps.media.requireFreshAttachment = () => {
+    freshAttachments += 1;
+  };
+
+  await player.performSeek(120_000);
+
+  expect(freshAttachments).toBe(1);
+});
+
 test("aborts an obsolete quality preparation and applies only the latest selection", async () => {
   const requested: number[] = [];
   let aborted = 0;
@@ -125,6 +142,7 @@ function harness(
   player.video = {
     currentTime: 120,
     paused: false,
+    webkitSupportsFullscreen: undefined,
     pause: () => {
       player.video.paused = true;
       pause();
@@ -136,6 +154,7 @@ function harness(
   };
   player.deps = {
     loop: { stop, start: () => undefined, quiesce },
+    media: { requireFreshAttachment: () => undefined },
     playback: { seek },
   };
   player.emitter = { emit: () => undefined };
