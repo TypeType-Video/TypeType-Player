@@ -1,6 +1,7 @@
 import { type BufferPolicy, resolveBufferPolicy } from "./buffer-policy";
 import type { EventEmitter } from "./event-emitter";
 import { HttpClient } from "./http-client";
+import { bufferedEndAtCurrentTrackRanges } from "./media-buffer";
 import { MediaElementObserver } from "./media-element-observer";
 import { MediaSourceController } from "./media-source-controller";
 import { PlaybackClient } from "./playback-client";
@@ -53,6 +54,17 @@ export function createPlayerDeps(args: Args): PlayerDeps {
   });
   const media = new MediaSourceController(args.video);
   const scheduler = new SegmentScheduler(http, media, args.emitter, policy.segmentPollLimit);
+  const currentBufferedEndMs = () => {
+    const elementBufferedEndMs = bufferedEndMs(args.video);
+    if (elementBufferedEndMs > 0) return elementBufferedEndMs;
+    const session = args.session();
+    if (!session) return elementBufferedEndMs;
+    return bufferedEndAtCurrentTrackRanges(
+      media.bufferedRanges(),
+      Math.max(0, Math.round(args.video.currentTime * 1000)),
+      session.manifest.video !== null,
+    );
+  };
   const loop = new PlaybackLoop({
     video: args.video,
     playback,
@@ -63,7 +75,7 @@ export function createPlayerDeps(args: Args): PlayerDeps {
     playbackRate,
     session: args.session,
     signal: args.signal,
-    bufferedEndMs: () => bufferedEndMs(args.video),
+    bufferedEndMs: currentBufferedEndMs,
     error: args.loopError,
   });
   const destroy = () => {
