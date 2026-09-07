@@ -310,6 +310,7 @@ import type {
     const revision = this.operation.next();
     const signal = this.operation.signal;
     const targetMs = Math.max(0, Math.round(positionMs));
+    if (isWebKitMediaElement(this.video)) this.deps.media.requireFreshAttachment();
     if (!quality) {
       this.deps.loop.stop();
       await this.deps.loop.quiesce();
@@ -457,12 +458,13 @@ import type {
   }
 
   /** Applies a bounded decode preroll using the player-owned media override. */
-  private runDecodePreroll(
+  private async runDecodePreroll(
     targetMs: number,
     resumePlayback: boolean,
     signal: AbortSignal,
     requireFrame = false,
   ): Promise<void> {
+    await this.deps.loop.fillOnce();
     return runDecodePreroll(
       this.video,
       targetMs,
@@ -689,4 +691,11 @@ function isAbortError(error: unknown): boolean {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error("SABR playback recovery failed");
+}
+
+function isWebKitMediaElement(video: HTMLVideoElement): boolean {
+  return (
+    typeof (video as HTMLVideoElement & { webkitSupportsFullscreen?: unknown })
+      .webkitSupportsFullscreen === "boolean"
+  );
 }

@@ -1,6 +1,7 @@
 import type { HttpClient } from "./http-client";
 import {
   isPlaybackSessionExpiryStatus,
+  playbackSegmentTimeoutError,
   playbackSessionExpiredError,
 } from "./playback-window-error";
 
@@ -19,7 +20,7 @@ export async function fetchSegmentBytes(
     const delayMs = await retryAfterMs(response);
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
-  throw new Error("Segment was not ready in time");
+  throw playbackSegmentTimeoutError();
 }
 
 async function retryAfterMs(response: Response): Promise<number> {

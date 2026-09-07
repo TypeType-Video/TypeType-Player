@@ -29,6 +29,14 @@ export function playbackSessionExpiredError(): PlaybackWindowRecoveryError {
   return new PlaybackWindowRecoveryError("Playback session expired", "retry_fresh_session", []);
 }
 
+export function playbackSegmentTimeoutError(): PlaybackWindowRecoveryError {
+  return new PlaybackWindowRecoveryError(
+    "SABR segment was not ready in time",
+    "retry_fresh_session",
+    [],
+  );
+}
+
 export function isPlaybackSessionExpiryStatus(status: number): boolean {
   return status === 404 || status === 410;
 }
