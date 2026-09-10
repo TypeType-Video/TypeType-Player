@@ -1,12 +1,39 @@
 const RANGE_TOLERANCE_SECONDS = 0.05;
+const TRACK_RANGE_TOLERANCE_MS = 50;
 const MIN_SEEK_BUFFER_MS = 250;
 const RANGE_ENTRY_OFFSET_SECONDS = 0.001;
+
+export type BufferedTrackRange = {
+  kind: "audio" | "video";
+  startMs: number;
+  endMs: number;
+};
 
 export function bufferedEndAtCurrentTime(
   video: Pick<HTMLVideoElement, "buffered" | "currentTime">,
 ): number {
   const range = bufferedRangeAt(video.buffered, video.currentTime);
   return range ? Math.round(range.end * 1000) : 0;
+}
+
+export function bufferedEndAtCurrentTrackRanges(
+  ranges: readonly BufferedTrackRange[],
+  currentMs: number,
+  hasVideo: boolean,
+): number {
+  const kinds: BufferedTrackRange["kind"][] = hasVideo ? ["audio", "video"] : ["audio"];
+  const ends = kinds.map((kind) => {
+    const range = ranges.find(
+      (candidate) =>
+        candidate.kind === kind &&
+        candidate.startMs <= currentMs + TRACK_RANGE_TOLERANCE_MS &&
+        candidate.endMs > currentMs - TRACK_RANGE_TOLERANCE_MS,
+    );
+    return range?.endMs ?? null;
+  });
+  if (ends.some((endMs) => endMs === null)) return 0;
+  const completeEnds = ends.filter((endMs): endMs is number => endMs !== null);
+  return Math.min(...completeEnds);
 }
 
 export function seekWithinBufferedMedia(

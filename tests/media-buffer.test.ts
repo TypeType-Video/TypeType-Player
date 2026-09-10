@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   alignPlayheadToBufferedRange,
   bufferedEndAtCurrentTime,
+  bufferedEndAtCurrentTrackRanges,
   canUseBufferedMediaSeek,
   seekWithinBufferedMedia,
 } from "../src/media-buffer";
@@ -32,6 +33,17 @@ test("does not report media beyond a gap as buffered at the playhead", () => {
       ),
     ),
   ).toBe(0);
+});
+
+test("uses the shorter source-buffer track when the media element range is empty", () => {
+  const ranges = [
+    { kind: "audio" as const, startMs: 0, endMs: 20_000 },
+    { kind: "video" as const, startMs: 500, endMs: 18_000 },
+  ];
+
+  expect(bufferedEndAtCurrentTrackRanges(ranges, 1_000, true)).toBe(18_000);
+  expect(bufferedEndAtCurrentTrackRanges(ranges, 19_000, true)).toBe(0);
+  expect(bufferedEndAtCurrentTrackRanges(ranges, 1_000, false)).toBe(20_000);
 });
 
 test("seeks locally only when the target has enough buffered media", () => {

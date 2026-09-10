@@ -1,18 +1,19 @@
 import type { EventEmitter } from "./event-emitter";
 import type { HttpClient } from "./http-client";
 import type { ManifestSegment, PlaybackManifest } from "./manifest";
-import type { MediaSourceController } from "./media-source-controller";
+import type { MediaBufferedRange, MediaSourceController } from "./media-source-controller";
 import { fetchSegmentBytes } from "./segment-fetcher";
 import type { TrackKind } from "./types";
 
+const BUFFERED_RANGE_TOLERANCE_MS = 50;
+
 export class SegmentScheduler {
   private readonly appended = new Set<string>();
-  private readonly appendedEndMs = new Map<TrackKind, number>();
   private revision = 0;
 
   constructor(
     private readonly http: HttpClient,
-    private readonly media: MediaSourceController,
+    private readonly media: Pick<MediaSourceController, "append" | "bufferedRanges">,
     private readonly emitter: EventEmitter,
     private readonly pollLimit: number,
   ) {}
@@ -20,7 +21,6 @@ export class SegmentScheduler {
   reset(): void {
     this.revision += 1;
     this.appended.clear();
-    this.appendedEndMs.clear();
   }
 
   async appendInit(manifest: PlaybackManifest, signal?: AbortSignal): Promise<void> {
@@ -65,8 +65,7 @@ export class SegmentScheduler {
       .sort((left, right) => left.startMs - right.startMs);
     for (const segment of candidates) {
       const segmentEndMs = segment.startMs + segment.durationMs;
-      const appendedEndMs = this.appendedEndMs.get(kind);
-      if (appendedEndMs !== undefined && segmentEndMs <= appendedEndMs) continue;
+      if (this.isBuffered(kind, segment.startMs, segmentEndMs)) continue;
       await this.appendUrl(
         kind,
         segment.url,
@@ -75,7 +74,6 @@ export class SegmentScheduler {
         revision,
         signal,
       );
-      this.appendedEndMs.set(kind, Math.max(appendedEndMs ?? 0, segmentEndMs));
     }
   }
 
@@ -89,7 +87,10 @@ export class SegmentScheduler {
   ): Promise<void> {
     this.ensureActive(revision, signal);
     const key = `${kind}:${url}`;
-    if (this.appended.has(key)) return;
+    if (this.appended.has(key)) {
+      if (durationMs <= 0 || this.isBuffered(kind, startMs, startMs + durationMs)) return;
+      this.appended.delete(key);
+    }
     const bytes = await fetchSegmentBytes(this.http, url, this.pollLimit, signal);
     this.ensureActive(revision, signal);
     await this.media.append(kind, bytes);
@@ -98,9 +99,27 @@ export class SegmentScheduler {
     this.emitter.emit({ type: "segment", kind, url, startMs, durationMs });
   }
 
+  private isBuffered(kind: TrackKind, startMs: number, endMs: number): boolean {
+    if (endMs <= startMs) return false;
+    return this.media.bufferedRanges().some((range) => coversSegment(range, kind, startMs, endMs));
+  }
+
   private ensureActive(revision: number, signal?: AbortSignal): void {
     if (revision !== this.revision || signal?.aborted) {
       throw new DOMException("Operation aborted", "AbortError");
     }
   }
+}
+
+function coversSegment(
+  range: MediaBufferedRange,
+  kind: TrackKind,
+  startMs: number,
+  endMs: number,
+): boolean {
+  return (
+    range.kind === kind &&
+    range.startMs <= startMs + BUFFERED_RANGE_TOLERANCE_MS &&
+    range.endMs >= endMs - BUFFERED_RANGE_TOLERANCE_MS
+  );
 }
