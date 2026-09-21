@@ -225,6 +225,22 @@ test("updates the MSE live seekable range as the live head advances", () => {
   expect(mediaSource.durationWrites).toBe(2);
 });
 
+test("does not shorten finite duration after buffered media extends it", () => {
+  const mediaSource = new FakeMediaSource();
+  const { video } = videoElement("blob:finite");
+  const controller = new MediaSourceController(video);
+  const state = controller as unknown as ControllerState;
+  state.objectUrl = "blob:finite";
+  state.mediaSource = mediaSource as unknown as MediaSource;
+  mediaSource.duration = 120.294;
+  const writes = mediaSource.durationWrites;
+
+  controller.updateTiming(manifest(true));
+
+  expect(mediaSource.duration).toBe(120.294);
+  expect(mediaSource.durationWrites).toBe(writes);
+});
+
 class FakeMediaSource {
   readonly sourceBuffers: SourceBuffer[] = [];
   readonly removed: SourceBuffer[] = [];
