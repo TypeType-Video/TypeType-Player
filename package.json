@@ -1,6 +1,6 @@
 {
   "name": "@typetype/mse",
-  "version": "0.1.60",
+  "version": "0.1.61",
   "description": "MSE playback engine for TypeType",
   "license": "MIT",
   "type": "module",
