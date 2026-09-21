@@ -88,7 +88,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - if: steps.npm-version.outputs.exists != 'true'
-        run: npm publish "${{ steps.pack.outputs.filename }}" --access public
+        run: npm publish "${{ steps.pack.outputs.filename }}" --access public --provenance=false
 
   publish-jsr:
     if: (github.event_name == 'push' && startsWith(github.ref_name, 'v')) || inputs.registry == 'jsr' || inputs.registry == 'both'
