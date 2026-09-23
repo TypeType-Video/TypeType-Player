@@ -5,9 +5,9 @@ export type {
   ManifestTrack,
   PlaybackManifest,
 } from "./manifest";
+export { isMseTypeSupported } from "./media-source-runtime";
 export type { PlaybackPolicy, PlaybackPolicyInput, PlaybackRetryPolicy } from "./playback-policy";
 export { bufferSeconds, resolvePlaybackPolicy } from "./playback-policy";
-export { isMseTypeSupported } from "./media-source-runtime";
 export type {
   PlaybackBufferedRange,
   PlaybackWindow,

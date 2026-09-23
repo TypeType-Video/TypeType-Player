@@ -43,10 +43,7 @@ export function resolvePlaybackPolicy(input: PlaybackPolicyInput = {}): Playback
     manifestAttempts: positiveInteger(input.manifestAttempts, DEFAULT_POLICY.manifestAttempts),
     mediaAttempts: positiveInteger(input.mediaAttempts, DEFAULT_POLICY.mediaAttempts),
     retryIntervalMs: positiveMs(input.retryIntervalMs, DEFAULT_POLICY.retryIntervalMs),
-    liveTargetLatencyMs: positiveMs(
-      input.liveTargetLatencyMs,
-      DEFAULT_POLICY.liveTargetLatencyMs,
-    ),
+    liveTargetLatencyMs: positiveMs(input.liveTargetLatencyMs, DEFAULT_POLICY.liveTargetLatencyMs),
     liveMaxLatencyMs: positiveMs(input.liveMaxLatencyMs, DEFAULT_POLICY.liveMaxLatencyMs),
     liveCatchupMinRate: playbackRate(input.liveCatchupMinRate, DEFAULT_POLICY.liveCatchupMinRate),
     liveCatchupMaxRate: playbackRate(input.liveCatchupMaxRate, DEFAULT_POLICY.liveCatchupMaxRate),
