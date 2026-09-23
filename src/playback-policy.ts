@@ -1,9 +1,11 @@
+/** Retry budgets for manifest and media transport requests. */
 export type PlaybackRetryPolicy = {
   manifestAttempts: number;
   mediaAttempts: number;
   retryIntervalMs: number;
 };
 
+/** Transport-independent buffering, live-edge, and retry policy. */
 export type PlaybackPolicy = PlaybackRetryPolicy & {
   startupBufferMs: number;
   steadyBufferMs: number;
@@ -16,6 +18,7 @@ export type PlaybackPolicy = PlaybackRetryPolicy & {
   liveCatchupMaxRate: number;
 };
 
+/** Optional overrides applied to the default TypeType playback policy. */
 export type PlaybackPolicyInput = Partial<PlaybackPolicy>;
 
 const DEFAULT_POLICY: PlaybackPolicy = {
@@ -33,6 +36,7 @@ const DEFAULT_POLICY: PlaybackPolicy = {
   liveCatchupMaxRate: 1.25,
 };
 
+/** Resolve a transport policy with bounded, internally consistent values. */
 export function resolvePlaybackPolicy(input: PlaybackPolicyInput = {}): PlaybackPolicy {
   const policy = {
     startupBufferMs: positiveMs(input.startupBufferMs, DEFAULT_POLICY.startupBufferMs),
@@ -55,6 +59,7 @@ export function resolvePlaybackPolicy(input: PlaybackPolicyInput = {}): Playback
   return policy;
 }
 
+/** Convert a policy duration from milliseconds to seconds. */
 export function bufferSeconds(valueMs: number): number {
   return valueMs / 1_000;
 }
