@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { bufferSeconds, resolvePlaybackPolicy } from "../src/playback-policy";
 
 describe("playback policy", () => {
-  test("uses low-latency defaults from Xtra and the existing web player", () => {
+  test("uses a lower live HLS target latency", () => {
     const policy = resolvePlaybackPolicy();
 
     expect(policy).toEqual({
@@ -14,8 +14,8 @@ describe("playback policy", () => {
       manifestAttempts: 5,
       mediaAttempts: 3,
       retryIntervalMs: 500,
-      liveTargetLatencyMs: 10_000,
-      liveMaxLatencyMs: 20_000,
+      liveTargetLatencyMs: 5_000,
+      liveMaxLatencyMs: 15_000,
       liveCatchupMinRate: 1,
       liveCatchupMaxRate: 1.25,
     });
