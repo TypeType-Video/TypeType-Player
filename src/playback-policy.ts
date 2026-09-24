@@ -30,8 +30,8 @@ const DEFAULT_POLICY: PlaybackPolicy = {
   manifestAttempts: 5,
   mediaAttempts: 3,
   retryIntervalMs: 500,
-  liveTargetLatencyMs: 2_000,
-  liveMaxLatencyMs: 15_000,
+  liveTargetLatencyMs: 10_000,
+  liveMaxLatencyMs: 20_000,
   liveCatchupMinRate: 1,
   liveCatchupMaxRate: 1.25,
 };
