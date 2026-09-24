@@ -29,6 +29,21 @@ describe("HLS transport", () => {
     expect(config).not.toHaveProperty("liveBackBufferLength");
   });
 
+  test("versions every opaque media request within a playback generation", () => {
+    const config = createHlsConfig<{ fetchSetup: unknown }, object>({
+      FetchLoader: class {},
+      playbackKey: "generation-1",
+    });
+    const setup = config.fetchSetup as (
+      context: { url: string },
+      initParams: RequestInit,
+    ) => Request;
+    const url = "https://example.test/media/m1_0123456789abcdefghijklmn";
+
+    expect(new URL(setup({ url }, {}).url).searchParams.get("playback")).toBe("generation-1-0");
+    expect(new URL(setup({ url }, {}).url).searchParams.get("playback")).toBe("generation-1-1");
+  });
+
   test("versions opaque media handles by playback generation", () => {
     const handle = "/media/m1_0123456789abcdefghijklmn";
     expect(isMediaHandleUrl(handle)).toBe(true);

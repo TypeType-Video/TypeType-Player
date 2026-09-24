@@ -49,6 +49,7 @@ export type DashStreamingSettings = {
   };
 };
 
+/** Detect an opaque provider media handle that requires a playback-generation query. */
 export function isMediaHandleUrl(url: string): boolean {
   return MEDIA_HANDLE_PATTERN.test(url);
 }
