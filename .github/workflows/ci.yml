@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   validate:
-    runs-on: [self-hosted, Linux, X64, ci-stack]
+    runs-on: ${{ github.event_name == 'pull_request' && 'ubuntu-24.04' || fromJSON('["self-hosted","Linux","X64","ci-stack"]') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -42,8 +42,8 @@ jobs:
       - run: node --input-type=module --eval 'const mod = await import("./dist/index.js"); if (typeof mod.TypeTypeMsePlayer !== "function") process.exit(1)'
 
   dependency-review:
+    runs-on: ubuntu-24.04
     if: github.event_name == 'pull_request'
-    runs-on: [self-hosted, Linux, X64, ci-stack]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
