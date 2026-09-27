@@ -22,6 +22,13 @@ export class MediaSourceTiming {
   }
 
   private setDuration(mediaSource: MediaSource, duration: number): void {
+    if (
+      Number.isFinite(duration) &&
+      Number.isFinite(mediaSource.duration) &&
+      mediaSource.duration > duration + TIMING_TOLERANCE_SECONDS
+    ) {
+      return;
+    }
     if (sameNumber(mediaSource.duration, duration)) return;
     mediaSource.duration = duration;
   }

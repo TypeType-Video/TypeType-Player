@@ -4,6 +4,8 @@
   <p>The browser MSE and SABR playback engine for TypeType.</p>
 </div>
 
+You want to know the current position of TypeType about AI ? Go check [this](https://github.com/TypeType-Video/TypeType/blob/dev/AI_TRANSPARENCY.md).
+
 TypeType-Player is the TypeScript package that turns TypeType playback sessions into audio and video on an `HTMLVideoElement`. It owns the Media Source Extensions pipeline and leaves controls and page layout to the consuming application.
 
 The TypeType web client uses this package through [TypeType-Frontend](https://github.com/TypeType-Video/TypeType-Frontend). The playback-session API is provided by [TypeType-Server](https://github.com/TypeType-Video/TypeType-Server).
