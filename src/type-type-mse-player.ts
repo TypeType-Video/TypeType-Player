@@ -1,9 +1,11 @@
 import { BufferedSeekRecovery } from "./buffered-seek-recovery";
 import { decodeStartMs, runDecodePreroll } from "./decode-preroll";
 import { EventEmitter } from "./event-emitter";
+import { TypeTypeHttpError } from "./http-client";
 import { LiveEdgeFollower } from "./live-edge-follower";
 import { skipBufferedLiveGap } from "./live-media-gap";
 import { alignPlayheadToBufferedRange, canUseBufferedMediaSeek } from "./media-buffer";
+import { MediaElementPlaybackError } from "./media-element-observer";
 import { playMedia, tryResumePlayback } from "./media-playback";
 import { PlaybackIntent } from "./playback-intent";
 import {
@@ -77,6 +79,13 @@ import type {
       error: (error) => {
         if (this.bufferedSeekRecovery.handleDecoderError(error)) return true;
         this.bufferedSeekRecovery.cancel();
+        if (isRecoverableDecodeError(error) && this.session) {
+          this.handlePlaybackLoopError(error, {
+            sessionId: this.session.response.sessionId,
+            signal: this.operation.signal,
+          });
+          return true;
+        }
         this.reportPlaybackFailure(error);
         return false;
       },
@@ -310,6 +319,7 @@ import type {
     const revision = this.operation.next();
     const signal = this.operation.signal;
     const targetMs = Math.max(0, Math.round(positionMs));
+    this.recoveryPositionMs = targetMs;
     if (isWebKitMediaElement(this.video)) this.deps.media.requireFreshAttachment();
     if (!quality) {
       this.deps.loop.stop();
@@ -338,6 +348,14 @@ import type {
       if (quality) emitQuality(this.emitter, session);
     } catch (error) {
       if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
+        if (isRecoverableSeekError(error)) {
+          this.handlePlaybackLoopError(
+            error,
+            { sessionId: current.response.sessionId, signal },
+            targetMs,
+          );
+          return;
+        }
         this.deps.loop.start();
         this.playerState.set(this.video.paused ? "ready" : "playing");
       }
@@ -476,16 +494,24 @@ import type {
   }
 
   /** Recovers terminal playback windows within the bounded fresh-session budget. */
-  private handlePlaybackLoopError(error: Error, context: PlaybackLoopFailureContext): void {
+  private handlePlaybackLoopError(
+    error: Error,
+    context: PlaybackLoopFailureContext,
+    recoveryPositionMs?: number,
+  ): void {
     if (this.destroyed || context.signal.aborted) return;
     const current = this.session;
     const sessionId = context.sessionId;
     if (!current || sessionId === null || sessionId !== current.response.sessionId) return;
-    if (!(error instanceof PlaybackWindowRecoveryError)) {
+    if (!isRecoverablePlaybackError(error)) {
       this.reportPlaybackFailure(error);
       return;
     }
-    this.rememberRecoveryPosition(currentTimeMs(this.video));
+    if (recoveryPositionMs !== undefined) {
+      this.recoveryPositionMs = recoveryPositionMs;
+    } else if (!isRecoverableDecodeError(error)) {
+      this.rememberRecoveryPosition(currentTimeMs(this.video));
+    }
     const positionMs = this.recoveryPositionMs;
     const decision = this.playbackRecovery.begin(sessionId);
     if (decision === "ignore") return;
@@ -691,6 +717,24 @@ function isAbortError(error: unknown): boolean {
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error("SABR playback recovery failed");
+}
+
+function isRecoverableDecodeError(error: Error): boolean {
+  return error instanceof MediaElementPlaybackError && error.code === 3;
+}
+
+const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+
+function isRecoverablePlaybackError(error: Error): boolean {
+  return (
+    error instanceof PlaybackWindowRecoveryError ||
+    isRecoverableDecodeError(error) ||
+    (error instanceof TypeTypeHttpError && TRANSIENT_GATEWAY_STATUSES.has(error.status))
+  );
+}
+
+function isRecoverableSeekError(error: unknown): error is Error {
+  return error instanceof Error && isRecoverablePlaybackError(error);
 }
 
 function isWebKitMediaElement(video: HTMLVideoElement): boolean {

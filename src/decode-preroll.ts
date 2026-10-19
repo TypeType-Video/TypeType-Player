@@ -115,8 +115,7 @@ async function snapToTarget(
       if (exact && !video.seeking && video.readyState >= HAVE_CURRENT_DATA) {
         return resolve();
       }
-      if (performance.now() - startedAt >= SNAP_TIMEOUT_MS)
-        return reject(new Error("Seek target snap timed out"));
+      if (performance.now() - startedAt >= SNAP_TIMEOUT_MS) return resolve();
       setTimeout(poll, 10);
     };
     poll();

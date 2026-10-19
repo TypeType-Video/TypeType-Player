@@ -2,7 +2,7 @@ import type { BufferPolicy } from "./buffer-policy";
 import type { PlaybackManifest } from "./manifest";
 import { MediaSourceController } from "./media-source-controller";
 import type { PlaybackClient, PlaybackResponse } from "./playback-client";
-import type { PlaybackWindowRequest } from "./playback-window";
+import type { PlaybackWindow, PlaybackWindowRequest } from "./playback-window";
 import {
   PlaybackWindowRecoveryError,
   PlaybackWindowTerminalError,
@@ -46,7 +46,10 @@ export async function loadPlaybackSession(args: LoadSessionArgs): Promise<Loaded
     ...createPlaybackWindowRequest(args, requestedStartTimeMs(args)),
     bufferedRanges: [],
   });
-  const window = await waitForWindow(args, args.response.sessionId, request);
+  const sessionId = args.response.sessionId;
+  const window = await waitForWindow(args, sessionId, request, (position) => {
+    args.response = updateGenerationFromPosition(args.response, sessionId, position);
+  });
   if (!window.manifest) throw new Error("Playback window is not ready");
   const resolvedStartTimeMs =
     window.startTimeMs ?? window.manifest.startTimeMs ?? requestedStartTimeMs(args);
@@ -107,8 +110,14 @@ export async function refreshPlaybackWindow(
   signal: AbortSignal,
   playbackRate?: () => number,
 ): Promise<void> {
-  const window = await pollSegments({ playback, policy, signal }, session.response.sessionId, () =>
-    createPlaybackWindowRequest({ ...session, media, policy, playbackRate }, playerTimeMs()),
+  const sessionId = session.response.sessionId;
+  const window = await pollSegments(
+    { playback, policy, signal },
+    sessionId,
+    () => createPlaybackWindowRequest({ ...session, media, policy, playbackRate }, playerTimeMs()),
+    (position) => {
+      session.response = updateGenerationFromPosition(session.response, sessionId, position);
+    },
   );
   if (!window?.manifest) return;
   ensureNotAborted(signal);
@@ -127,16 +136,20 @@ async function waitForWindow(
   args: Pick<LoadSessionArgs, "playback" | "policy" | "signal">,
   sessionId: string,
   request: () => PlaybackWindowRequest,
+  onPosition: (position: PlaybackWindow) => void,
 ) {
-  return pollSegments(args, sessionId, request);
+  return pollSegments(args, sessionId, request, onPosition);
 }
 
 async function pollSegments(
   args: Pick<LoadSessionArgs, "playback" | "policy" | "signal">,
   sessionId: string,
   request: () => PlaybackWindowRequest,
+  onPosition: (position: PlaybackWindow) => void,
 ) {
-  handleWindow(await args.playback.position(sessionId, request(), args.signal));
+  const position = handleWindow(await args.playback.position(sessionId, request(), args.signal));
+  ensureNotAborted(args.signal);
+  onPosition(position);
   let previousEdgeMs: number | null = null;
   let stagnantAttempts = 0;
   for (let attempt = 0; attempt < args.policy.manifestPollLimit; attempt += 1) {
@@ -189,4 +202,14 @@ function handleWindow(window: Awaited<ReturnType<PlaybackClient["segments"]>>) {
     );
   }
   throw new PlaybackWindowTerminalError(window.terminalError);
+}
+
+function updateGenerationFromPosition(
+  response: PlaybackResponse,
+  sessionId: string,
+  position: PlaybackWindow,
+): PlaybackResponse {
+  if (position.sessionId !== sessionId || position.generation === null) return response;
+  if (response.generation !== null && position.generation < response.generation) return response;
+  return { ...response, generation: position.generation };
 }

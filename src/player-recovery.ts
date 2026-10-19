@@ -1,5 +1,5 @@
 import type { CreatePlaybackRequest, PlaybackResponse } from "./playback-client";
-import type { LoadedSession, PlaybackWindowRecoveryError } from "./session-loader";
+import type { LoadedSession } from "./session-loader";
 
 export const MAX_FRESH_SESSION_RECOVERIES = 2;
 const STABLE_PLAYBACK_RESET_MS = 30_000;
@@ -97,7 +97,7 @@ type RecoverySelection = {
 type RecoverArgs = {
   recovery: PlaybackRecovery;
   current: LoadedSession;
-  error: PlaybackWindowRecoveryError;
+  error: Error;
   videoId: string;
   isLive?: boolean;
   startTimeMs: number;

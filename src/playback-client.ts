@@ -110,8 +110,15 @@ export class PlaybackClient {
     if (options.audioTrackId) params.set("audioTrackId", options.audioTrackId);
     if (options.audioOnly) params.set("audioOnly", "true");
     const init = signal ? { method: "POST", signal } : { method: "POST" };
-    const response = await this.http.json(`/sabr/playback/${session}/seek?${params}`, init);
-    return parsePlaybackResponse(response);
+    try {
+      const response = await this.http.json(`/sabr/playback/${session}/seek?${params}`, init);
+      return parsePlaybackResponse(response);
+    } catch (error) {
+      if (error instanceof TypeTypeHttpError && isPlaybackSessionExpiryStatus(error.status)) {
+        throw playbackSessionExpiredError();
+      }
+      throw error;
+    }
   }
 
   async position(

@@ -71,6 +71,24 @@ test("turns an expired playback window into fresh session recovery", async () =>
   });
 });
 
+test("turns an expired playback seek into fresh session recovery", async () => {
+  const http = {
+    json: async () => {
+      throw new TypeTypeHttpError("Not Found", 404);
+    },
+    absolute: (path: string) => `https://beta.typetype.video/api${path}`,
+  } as unknown as HttpClient;
+
+  const request = new PlaybackClient(http).seek("expired", 521_000);
+  const error = await request.catch((reason: unknown) => reason);
+
+  expect(error).toBeInstanceOf(PlaybackWindowRecoveryError);
+  expect(error).toMatchObject({
+    message: "Playback session expired",
+    recoveryAction: "retry_fresh_session",
+  });
+});
+
 test("does not mask unrelated playback window failures", async () => {
   const http = {
     json: async () => {

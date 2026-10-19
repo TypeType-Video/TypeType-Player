@@ -91,3 +91,66 @@ test("refreshes playback state while polling a delayed window", async () => {
   expect(requests.map((request) => request.bufferGoalMs)).toEqual([60_000, 60_000, 60_000, 60_000]);
   expect(requests.at(-1)?.bufferedRanges.map((range) => range.endMs)).toEqual([69_000, 69_000]);
 });
+
+test("adopts the active generation returned by a stale position update", async () => {
+  const requestGenerations: number[] = [];
+  const response = (generation: number, ready: boolean): PlaybackWindow => ({
+    sessionId: "session",
+    generation,
+    ready,
+    retryAfterMs: 1,
+    terminalError: null,
+    recoveryAction: null,
+    retryVideoItags: [],
+    status: ready ? "ready" : "idle",
+    blockedBy: ready ? null : "video:137:15 pending",
+    bufferedEdgeMs: 69_000,
+    manifest: ready ? manifest : null,
+  });
+  const playback = {
+    position: async (_sessionId: string, _request: PlaybackWindowRequest) => response(7, false),
+    prefetch: async (_sessionId: string, request: PlaybackWindowRequest) => {
+      requestGenerations.push(request.generation ?? -1);
+      return response(7, true);
+    },
+    segments: async (_sessionId: string, request: PlaybackWindowRequest) => {
+      requestGenerations.push(request.generation ?? -1);
+      return response(7, true);
+    },
+  };
+  const session: LoadedSession = {
+    response: {
+      sessionId: "session",
+      videoId: "video",
+      generation: 0,
+      ready: true,
+      retryAfterMs: null,
+    },
+    manifest,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+  };
+
+  await refreshPlaybackWindow(
+    playback,
+    {
+      bufferedRanges: () => [],
+    },
+    session,
+    {
+      bufferGoalMs: 30_000,
+      backBufferMs: 30_000,
+      pollIntervalMs: 500,
+      manifestRefreshMs: 8_000,
+      manifestPollLimit: 3,
+      segmentPollLimit: 3,
+    },
+    () => 37_000,
+    new AbortController().signal,
+  );
+
+  expect(requestGenerations).toEqual([7, 7]);
+  expect(session.response.generation).toBe(7);
+});

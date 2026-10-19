@@ -139,3 +139,51 @@ test("follows active playback while preparing a quality replacement", async () =
   expect(requests.map((request) => request.playerTimeMs)).toEqual([20_000, 21_000, 22_000]);
   expect(session.response.startTimeMs).toBe(22_000);
 });
+
+test("uses the active generation returned during initial loading", async () => {
+  const generations: number[] = [];
+  const playback = {
+    position: async (_sessionId: string, request: PlaybackWindowRequest) => {
+      generations.push(request.generation ?? -1);
+      return { ...window(request, false), generation: 7 };
+    },
+    prefetch: async (_sessionId: string, request: PlaybackWindowRequest) => {
+      generations.push(request.generation ?? -1);
+      return window(request, true);
+    },
+    segments: async (_sessionId: string, request: PlaybackWindowRequest) => {
+      generations.push(request.generation ?? -1);
+      return window(request, true);
+    },
+  };
+
+  await loadPlaybackSession({
+    playback,
+    media: { attach: async () => undefined, bufferedRanges: () => [] },
+    scheduler: { reset: () => undefined, appendInit: async () => undefined },
+    video: { currentTime: 20 },
+    response: {
+      sessionId: "vp9-session",
+      videoId: "video",
+      generation: 0,
+      ready: false,
+      retryAfterMs: null,
+    },
+    videoItag: 247,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+    startTimeMs: 20_000,
+    policy: {
+      bufferGoalMs: 30_000,
+      backBufferMs: 30_000,
+      pollIntervalMs: 500,
+      manifestRefreshMs: 8_000,
+      manifestPollLimit: 2,
+      segmentPollLimit: 2,
+    },
+    signal: new AbortController().signal,
+  });
+
+  expect(generations).toEqual([0, 7, 7]);
+});

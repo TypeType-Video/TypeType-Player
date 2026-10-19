@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
+import { TypeTypeHttpError } from "../src/http-client";
+import { MediaElementPlaybackError } from "../src/media-element-observer";
 import type { PlaybackResponse } from "../src/playback-client";
+import { PlaybackWindowRecoveryError } from "../src/playback-window-error";
 import { harness, recoveryError, response } from "./type-type-mse-recovery-harness";
 
 test("recovers two consecutive active sessions before one final error", async () => {
@@ -27,6 +30,63 @@ test("recovers two consecutive active sessions before one final error", async ()
   expect(requests.map((request) => request.startTimeMs)).toEqual([379_441, 379_441]);
   expect(requests.map((request) => request.audioTrackId)).toEqual(["en-US.4", "en-US.4"]);
   expect(failures.map((error) => error.message)).toEqual(["SABR demand stalled"]);
+});
+
+test("recovers a decoder error at the last requested position", async () => {
+  const { player, requests, failures } = harness(async () => response("fresh"));
+  player.recoveryPositionMs = 521_000;
+  player.video.currentTime = 0;
+
+  player.handlePlaybackLoopError(new MediaElementPlaybackError(3), {
+    sessionId: "source",
+    signal: player.operation.signal,
+  });
+  await Bun.sleep(0);
+
+  expect(requests.map((request) => request.startTimeMs)).toEqual([521_000]);
+  expect(failures).toEqual([]);
+  expect(player.session?.response.sessionId).toBe("fresh");
+});
+
+test("keeps non-decoder media errors fatal", () => {
+  const { player, requests, failures } = harness(async () => response("unused"));
+  const error = new MediaElementPlaybackError(4);
+
+  player.handlePlaybackLoopError(error, {
+    sessionId: "source",
+    signal: player.operation.signal,
+  });
+
+  expect(requests).toHaveLength(0);
+  expect(failures).toEqual([error]);
+});
+
+test("recovers an expired explicit seek at the requested position", async () => {
+  const { player, requests, failures } = harness(async () => response("fresh"));
+  Reflect.apply(player.handlePlaybackLoopError, player, [
+    new PlaybackWindowRecoveryError("Playback session expired", "retry_fresh_session", []),
+    { sessionId: "source", signal: player.operation.signal },
+    521_000,
+  ]);
+  await Bun.sleep(0);
+
+  expect(requests.map((request) => request.startTimeMs)).toEqual([521_000]);
+  expect(failures).toEqual([]);
+  expect(player.session?.response.sessionId).toBe("fresh");
+});
+
+test("recovers transient gateway errors at the last good position", async () => {
+  const { player, requests, failures } = harness(async () => response("fresh"));
+
+  player.handlePlaybackLoopError(new TypeTypeHttpError("Bad Gateway", 502), {
+    sessionId: "source",
+    signal: player.operation.signal,
+  });
+  await Bun.sleep(0);
+
+  expect(requests.map((request) => request.startTimeMs)).toEqual([379_441]);
+  expect(failures).toEqual([]);
+  expect(player.session?.response.sessionId).toBe("fresh");
 });
 
 test("preserves explicit playback intent when stalled media reports paused", async () => {
