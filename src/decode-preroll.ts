@@ -106,20 +106,14 @@ async function snapToTarget(
   if (exact && !video.seeking && video.readyState >= HAVE_CURRENT_DATA) return false;
   if (resumePlayback && !video.paused) video.pause();
   video.currentTime = targetMs / 1000;
-  let resumeAttempted = false;
-  if (resumePlayback && video.paused) {
-    resumeAttempted = true;
-    await tryResumePlayback(video, signal);
-    ensureNotAborted(signal);
-  }
-  return new Promise((resolve, reject) => {
+  await new Promise<void>((resolve, reject) => {
     const startedAt = performance.now();
     const poll = () => {
       if (signal.aborted) return reject(new DOMException("Operation aborted", "AbortError"));
       if (video.error) return reject(new Error(video.error.message));
       const exact = Math.abs(video.currentTime * 1000 - targetMs) <= toleranceMs;
       if (exact && !video.seeking && video.readyState >= HAVE_CURRENT_DATA) {
-        return resolve(resumeAttempted);
+        return resolve();
       }
       if (performance.now() - startedAt >= SNAP_TIMEOUT_MS)
         return reject(new Error("Seek target snap timed out"));
@@ -127,6 +121,13 @@ async function snapToTarget(
     };
     poll();
   });
+  let resumeAttempted = false;
+  if (resumePlayback && video.paused) {
+    resumeAttempted = true;
+    await tryResumePlayback(video, signal);
+    ensureNotAborted(signal);
+  }
+  return resumeAttempted;
 }
 
 function ensureNotAborted(signal: AbortSignal): void {

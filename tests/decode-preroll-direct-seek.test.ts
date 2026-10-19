@@ -100,6 +100,59 @@ test("pauses a running overshoot before snapping and resuming", async () => {
   expect(video.paused).toBe(false);
 });
 
+test("waits for the native seek to finish before resuming an overshoot", async () => {
+  let currentTime = 402;
+  let paused = false;
+  let seeking = false;
+  let readyState = 4;
+  let plays = 0;
+  let playedWhileSeeking = false;
+  const video = {
+    autoplay: false,
+    buffered: emptyBuffered,
+    error: null,
+    muted: false,
+    playbackRate: 1,
+    get currentTime() {
+      return currentTime;
+    },
+    set currentTime(value: number) {
+      seeking = true;
+      readyState = 1;
+      setTimeout(() => {
+        currentTime = value;
+        seeking = false;
+        readyState = 4;
+        if (!paused) currentTime += 1 / 30;
+      }, 25);
+    },
+    get paused() {
+      return paused;
+    },
+    get readyState() {
+      return readyState;
+    },
+    get seeking() {
+      return seeking;
+    },
+    pause: () => {
+      paused = true;
+    },
+    play: async () => {
+      plays += 1;
+      playedWhileSeeking ||= seeking;
+      paused = false;
+    },
+  } as unknown as HTMLVideoElement;
+
+  await runDecodePreroll(video, 401_200, true, new AbortController().signal);
+
+  expect(plays).toBe(1);
+  expect(playedWhileSeeking).toBe(false);
+  expect(video.currentTime).toBe(401.2);
+  expect(video.paused).toBe(false);
+});
+
 test("uses a stable hidden decode preroll rate on WebKit", async () => {
   let currentTime = 398.36;
   let playbackRate = 1;
