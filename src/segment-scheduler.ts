@@ -6,6 +6,7 @@ import { fetchSegmentBytes } from "./segment-fetcher";
 import type { TrackKind } from "./types";
 
 const BUFFERED_RANGE_TOLERANCE_MS = 50;
+const APPENDED_RANGE_TOLERANCE_MS = 250;
 
 export type SegmentFillResult = "filled" | "deferred";
 
@@ -94,7 +95,10 @@ export class SegmentScheduler {
     this.ensureActive(revision, signal);
     const key = `${kind}:${url}`;
     if (this.appended.has(key)) {
-      if (durationMs <= 0 || this.isBuffered(kind, startMs, startMs + durationMs)) return true;
+      if (durationMs <= 0) return true;
+      if (this.isBuffered(kind, startMs, startMs + durationMs, APPENDED_RANGE_TOLERANCE_MS)) {
+        return true;
+      }
       this.appended.delete(key);
     }
     const bytes = await fetchSegmentBytes(
@@ -113,9 +117,16 @@ export class SegmentScheduler {
     return true;
   }
 
-  private isBuffered(kind: TrackKind, startMs: number, endMs: number): boolean {
+  private isBuffered(
+    kind: TrackKind,
+    startMs: number,
+    endMs: number,
+    toleranceMs = BUFFERED_RANGE_TOLERANCE_MS,
+  ): boolean {
     if (endMs <= startMs) return false;
-    return this.media.bufferedRanges().some((range) => coversSegment(range, kind, startMs, endMs));
+    return this.media
+      .bufferedRanges()
+      .some((range) => coversSegment(range, kind, startMs, endMs, toleranceMs));
   }
 
   private ensureActive(revision: number, signal?: AbortSignal): void {
@@ -130,10 +141,11 @@ function coversSegment(
   kind: TrackKind,
   startMs: number,
   endMs: number,
+  toleranceMs: number,
 ): boolean {
   return (
     range.kind === kind &&
-    range.startMs <= startMs + BUFFERED_RANGE_TOLERANCE_MS &&
-    range.endMs >= endMs - BUFFERED_RANGE_TOLERANCE_MS
+    range.startMs <= startMs + toleranceMs &&
+    range.endMs >= endMs - toleranceMs
   );
 }

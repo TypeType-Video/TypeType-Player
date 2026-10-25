@@ -154,3 +154,29 @@ function segmentExchange(): HttpExchange {
     body: new Uint8Array([1]).buffer,
   };
 }
+
+test("keeps an appended segment whose buffered range ends slightly early", async () => {
+  const requested: string[] = [];
+  let buffered: MediaBufferedRange[] = [];
+  const http = {
+    once: async (url: string) => {
+      requested.push(url);
+      return segmentExchange();
+    },
+  } as unknown as HttpClient;
+  const media = {
+    append: async () => {
+      buffered = [{ kind: "audio", startMs: 0, endMs: 9_920 }];
+      return "appended" as const;
+    },
+    bufferedRanges: () => buffered,
+  } as unknown as MediaSourceController;
+  const scheduler = new SegmentScheduler(http, media, { emit: () => undefined } as EventEmitter, 1);
+  const segment = { url: "/segment", startMs: 0, durationMs: 10_000 };
+
+  await scheduler.fill(manifest([segment]), 0, 10_000);
+  await scheduler.fill(manifest([segment]), 0, 10_000);
+  await scheduler.fill(manifest([segment]), 0, 10_000);
+
+  expect(requested).toEqual(["/segment"]);
+});
