@@ -47,6 +47,7 @@ import type {
   private readonly liveEdgeFollower: LiveEdgeFollower;
   private session: LoadedSession | null = null;
   private pendingPrerollTargetMs: number | null = null;
+  private pendingLoadSeekMs: number | null = null;
   private loadTask: Promise<void> | null = null;
   private liveEdgeCatchUpTask: Promise<void> | null = null;
   private lifecycleResumeTask: Promise<void> | null = null;
@@ -139,7 +140,9 @@ import type {
     const revision = this.operation.next();
     const signal = this.operation.signal;
     this.playerState.set("loading");
-    const startTimeMs = Math.max(0, Math.round(this.config.startTimeMs ?? 0));
+    const startTimeMs =
+      this.pendingLoadSeekMs ?? Math.max(0, Math.round(this.config.startTimeMs ?? 0));
+    this.pendingLoadSeekMs = null;
     this.recoveryPositionMs = startTimeMs;
     const response = await this.deps.playback.create(
       {
@@ -190,9 +193,10 @@ import type {
   }
   /** Seeks to a millisecond position without replacing the media element. */
   async seek(positionMs: number): Promise<void> {
+    const targetMs = Math.max(0, Math.round(positionMs));
+    if (this.loadTask || !this.session) return this.seekAfterLoad(targetMs);
     this.bufferedSeekRecovery.cancel();
     this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
-    const targetMs = Math.max(0, Math.round(positionMs));
     this.liveEdgeFollower.observeUserSeek(targetMs, this.session?.manifest.live);
     this.recoveryPositionMs = targetMs;
     if (
@@ -235,6 +239,22 @@ import type {
       `seek:${targetMs}`,
       (target) => this.performSeek(target),
       () => this.operation.abort(),
+    );
+  }
+
+  /** Applies the latest seek requested before the initial session became active. */
+  private seekAfterLoad(targetMs: number): Promise<void> {
+    this.pendingLoadSeekMs = targetMs;
+    this.recoveryPositionMs = targetMs;
+    const loadTask = this.loadTask;
+    if (!loadTask) return Promise.resolve();
+    return loadTask.then(
+      () => {
+        if (this.destroyed || this.pendingLoadSeekMs !== targetMs) return;
+        this.pendingLoadSeekMs = null;
+        return this.seek(targetMs);
+      },
+      () => undefined,
     );
   }
 
@@ -314,11 +334,16 @@ import type {
     ensurePlayerAlive(this.destroyed);
     this.bufferedSeekRecovery.cancel();
     const current = this.session;
-    if (!current) throw new Error("Player is not loaded");
+    const targetMs = Math.max(0, Math.round(positionMs));
+    if (!current) {
+      void this.seekAfterLoad(targetMs).catch((error: unknown) => {
+        if (!isAbortError(error)) this.reportPlaybackFailure(asError(error));
+      });
+      return;
+    }
     this.resetPlaybackRecovery();
     const revision = this.operation.next();
     const signal = this.operation.signal;
-    const targetMs = Math.max(0, Math.round(positionMs));
     this.recoveryPositionMs = targetMs;
     if (isWebKitMediaElement(this.video)) this.deps.media.requireFreshAttachment();
     if (!quality) {

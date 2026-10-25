@@ -118,8 +118,8 @@ export function harness(create: RecoveryHarness["deps"]["playback"]["create"], p
   };
   player.switchSession = async (...args) => {
     const playback = args[0] as PlaybackResponse;
-    const quality = args[4] as { videoItag: number };
-    const next = loaded(playback.sessionId, quality.videoItag);
+    const quality = args[4] as { videoItag: number } | undefined;
+    const next = loaded(playback.sessionId, quality?.videoItag);
     player.session = next;
     return next;
   };
