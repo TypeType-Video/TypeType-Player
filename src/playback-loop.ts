@@ -1,6 +1,7 @@
 import { PlaybackLoopTaskController } from "./playback-loop-task-controller";
 import type { PlaybackLoopArgs, PlaybackLoopFailureContext } from "./playback-loop-types";
 import { rateAwareBufferGoalMs, refreshThresholdMs } from "./playback-rate";
+import { SegmentGenerationConflictError } from "./playback-window-error";
 import { currentTimeMs } from "./player-snapshot";
 import type { LoadedSession } from "./session-loader";
 import { refreshPlaybackWindow } from "./session-loader";
@@ -87,7 +88,7 @@ export class PlaybackLoop {
       this.args.playbackRate?.() ?? 1,
     );
     const goalMs = currentMs + bufferGoalMs + this.liveStallRecoveryMs(bufferGoalMs);
-    await this.args.scheduler.fill(session.manifest, currentMs, goalMs, signal);
+    await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
     this.ensureCurrent(revision, signal);
     if (
       !session.manifest.endOfStream &&
@@ -102,7 +103,7 @@ export class PlaybackLoop {
           return;
         }
         this.ensureCurrent(revision, signal);
-        await this.args.scheduler.fill(session.manifest, currentMs, goalMs, signal);
+        await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
         this.ensureCurrent(revision, signal);
       }
     }
@@ -117,6 +118,32 @@ export class PlaybackLoop {
     if (session.manifest.endOfStream && this.args.media.endOfStream()) {
       this.stop();
       return;
+    }
+  }
+
+  private async fillCurrentGeneration(
+    session: LoadedSession,
+    currentMs: number,
+    goalMs: number,
+    signal: AbortSignal,
+    revision: number,
+  ): Promise<void> {
+    for (let refreshes = 0; ; refreshes += 1) {
+      try {
+        await this.args.scheduler.fill(session.manifest, currentMs, goalMs, signal);
+        return;
+      } catch (error) {
+        if (!(error instanceof SegmentGenerationConflictError)) throw error;
+        if (refreshes >= MAX_GENERATION_REFRESHES) throw error;
+      }
+      this.ensureCurrent(revision, signal);
+      this.requestManifestRefresh(revision);
+      try {
+        await this.refreshTask;
+      } catch {
+        throw new DOMException("Operation aborted", "AbortError");
+      }
+      this.ensureCurrent(revision, signal);
     }
   }
 
@@ -206,3 +233,4 @@ export class PlaybackLoop {
 }
 
 const HAVE_FUTURE_DATA = 3;
+const MAX_GENERATION_REFRESHES = 2;

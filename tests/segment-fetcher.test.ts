@@ -1,6 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
 import { HttpClient } from "../src/http-client";
-import { PlaybackWindowRecoveryError } from "../src/playback-window-error";
+import {
+  PlaybackWindowRecoveryError,
+  SegmentGenerationConflictError,
+} from "../src/playback-window-error";
 import { fetchSegmentBytes } from "../src/segment-fetcher";
 import { fakeRetryTiming } from "./fake-retry-timing";
 
@@ -148,4 +151,13 @@ test("aborts a pending segment poll immediately", async () => {
   controller.abort();
 
   await expect(request).rejects.toMatchObject({ name: "AbortError" });
+});
+
+test("reports a stale generation so the caller can refresh segment URLs", async () => {
+  const calls = sequence([() => new Response(null, { status: 409 })]);
+
+  const error = await fetchSegmentBytes(http, segmentUrl, 5).catch((reason: unknown) => reason);
+
+  expect(error).toBeInstanceOf(SegmentGenerationConflictError);
+  expect(calls()).toBe(1);
 });

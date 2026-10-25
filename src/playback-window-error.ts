@@ -19,6 +19,13 @@ export class PlaybackWindowRecoveryError extends PlaybackWindowTerminalError {
   }
 }
 
+export class SegmentGenerationConflictError extends PlaybackWindowRecoveryError {
+  constructor() {
+    super("Stale SABR playback generation", "retry_fresh_session", []);
+    this.name = "SegmentGenerationConflictError";
+  }
+}
+
 export class PlaybackWindowTimeoutError extends Error {
   constructor() {
     super("Playback window was not ready in time");

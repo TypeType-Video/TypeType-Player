@@ -3,6 +3,7 @@ import {
   isPlaybackSessionExpiryStatus,
   playbackSegmentTimeoutError,
   playbackSessionExpiredError,
+  SegmentGenerationConflictError,
 } from "./playback-window-error";
 import { parseRetryAfterMs } from "./retry-backoff";
 import { type RetryTiming, SYSTEM_RETRY_TIMING } from "./retry-timing";
@@ -32,6 +33,7 @@ export async function fetchSegmentBytes(
     }
     if (exchange.status === 200) return exchange.body;
     if (isPlaybackSessionExpiryStatus(exchange.status)) throw playbackSessionExpiredError();
+    if (exchange.status === 409) throw new SegmentGenerationConflictError();
     if (isTransientSegmentStatus(exchange.status)) {
       await retries.retry(retryAfterHeaderMs(exchange, timing), signal);
       continue;
