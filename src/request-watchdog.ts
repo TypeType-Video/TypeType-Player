@@ -3,8 +3,13 @@ export type RequestWatchdogTiming = {
   idleMs: number;
 };
 
-export const DEFAULT_REQUEST_WATCHDOG: RequestWatchdogTiming = {
+export const MEDIA_REQUEST_WATCHDOG: RequestWatchdogTiming = {
   firstByteMs: 30_000,
+  idleMs: 15_000,
+};
+
+export const API_REQUEST_WATCHDOG: RequestWatchdogTiming = {
+  firstByteMs: 60_000,
   idleMs: 15_000,
 };
 

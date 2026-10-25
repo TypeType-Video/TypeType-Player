@@ -1,6 +1,10 @@
 import { afterEach, expect, test } from "bun:test";
 import { HttpClient } from "../src/http-client";
-import { RequestStallError } from "../src/request-watchdog";
+import {
+  API_REQUEST_WATCHDOG,
+  MEDIA_REQUEST_WATCHDOG,
+  RequestStallError,
+} from "../src/request-watchdog";
 import { fakeRetryTiming } from "./fake-retry-timing";
 
 const originalFetch = globalThis.fetch;
@@ -76,4 +80,9 @@ test("reports a caller abort instead of a stall", async () => {
   controller.abort();
 
   await expect(request).rejects.toMatchObject({ name: "AbortError" });
+});
+
+test("gives session API requests more time to answer than media segments", () => {
+  expect(MEDIA_REQUEST_WATCHDOG).toEqual({ firstByteMs: 30_000, idleMs: 15_000 });
+  expect(API_REQUEST_WATCHDOG.firstByteMs).toBeGreaterThanOrEqual(60_000);
 });

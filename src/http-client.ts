@@ -1,5 +1,6 @@
 import {
-  DEFAULT_REQUEST_WATCHDOG,
+  API_REQUEST_WATCHDOG,
+  MEDIA_REQUEST_WATCHDOG,
   RequestWatchdog,
   type RequestWatchdogTiming,
   readWatchedBody,
@@ -36,11 +37,13 @@ export type HttpExchange = {
 
 export class HttpClient {
   private readonly timing: RetryTiming;
-  private readonly watchdog: RequestWatchdogTiming;
+  private readonly mediaWatchdog: RequestWatchdogTiming;
+  private readonly apiWatchdog: RequestWatchdogTiming;
 
   constructor(private readonly options: HttpClientOptions) {
     this.timing = options.retryTiming ?? SYSTEM_RETRY_TIMING;
-    this.watchdog = options.watchdog ?? DEFAULT_REQUEST_WATCHDOG;
+    this.mediaWatchdog = options.watchdog ?? MEDIA_REQUEST_WATCHDOG;
+    this.apiWatchdog = options.watchdog ?? API_REQUEST_WATCHDOG;
   }
 
   get retryTiming(): RetryTiming {
@@ -52,21 +55,8 @@ export class HttpClient {
     return JSON.parse(new TextDecoder().decode(exchange.body));
   }
 
-  async once(url: string, init?: RequestInit): Promise<HttpExchange> {
-    const watchdog = new RequestWatchdog(init?.signal, this.watchdog);
-    try {
-      const response = await watchdog.run(this.fetchRaw(url, { ...init, signal: watchdog.signal }));
-      watchdog.progress();
-      const body = await readWatchedBody(response, watchdog);
-      return {
-        status: response.status,
-        statusText: response.statusText,
-        headers: response.headers,
-        body,
-      };
-    } finally {
-      watchdog.dispose();
-    }
+  once(url: string, init?: RequestInit): Promise<HttpExchange> {
+    return this.exchange(url, init, this.mediaWatchdog);
   }
 
   absolute(path: string): string {
@@ -94,7 +84,7 @@ export class HttpClient {
     while (true) {
       let exchange: HttpExchange;
       try {
-        exchange = await this.once(url, init);
+        exchange = await this.exchange(url, init, this.apiWatchdog);
       } catch (error) {
         if (isAbortError(error)) throw error;
         if (!(await budget.wait(null, init?.signal))) throw error;
@@ -102,6 +92,27 @@ export class HttpClient {
       }
       if (!TRANSIENT_STATUSES.has(exchange.status)) return exchange;
       if (!(await budget.wait(this.retryAfterMs(exchange.headers), init?.signal))) return exchange;
+    }
+  }
+
+  private async exchange(
+    url: string,
+    init: RequestInit | undefined,
+    timing: RequestWatchdogTiming,
+  ): Promise<HttpExchange> {
+    const watchdog = new RequestWatchdog(init?.signal, timing);
+    try {
+      const response = await watchdog.run(this.fetchRaw(url, { ...init, signal: watchdog.signal }));
+      watchdog.progress();
+      const body = await readWatchedBody(response, watchdog);
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        body,
+      };
+    } finally {
+      watchdog.dispose();
     }
   }
 
