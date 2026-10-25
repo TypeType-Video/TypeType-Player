@@ -1,24 +1,31 @@
+import { parseRetryAfterMs, RetryBudget } from "./retry-backoff";
+import { type RetryTiming, SYSTEM_RETRY_TIMING } from "./retry-timing";
+
 export class TypeTypeHttpError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "TypeTypeHttpError";
   }
 }
 
-const MAX_TRANSIENT_RETRIES = 24;
-const MAX_RETRY_DELAY_MS = 3_000;
-const TRANSIENT_STATUSES = new Set([502, 503, 504]);
+const TRANSIENT_STATUSES = new Set([429, 502, 503, 504]);
 
 export type HttpClientOptions = {
   endpoint: string;
   headers?: HeadersInit;
+  retryTiming?: RetryTiming;
 };
 
 export class HttpClient {
-  constructor(private readonly options: HttpClientOptions) {}
+  private readonly timing: RetryTiming;
+
+  constructor(private readonly options: HttpClientOptions) {
+    this.timing = options.retryTiming ?? SYSTEM_RETRY_TIMING;
+  }
 
   async json(path: string, init?: RequestInit): Promise<unknown> {
     const response = await this.fetch(path, init);
@@ -49,23 +56,35 @@ export class HttpClient {
 
   private async fetchAbsolute(url: string, init?: RequestInit): Promise<Response> {
     const response = await this.fetchWithTransientRetry(url, init);
-    if (!response.ok) throw new TypeTypeHttpError(response.statusText, response.status);
+    if (!response.ok) {
+      throw new TypeTypeHttpError(
+        response.statusText,
+        response.status,
+        this.retryAfterMs(response),
+      );
+    }
     return response;
   }
 
   private async fetchWithTransientRetry(url: string, init?: RequestInit): Promise<Response> {
-    for (let attempt = 0; ; attempt += 1) {
+    const budget = new RetryBudget(this.timing);
+    while (true) {
+      let response: Response;
       try {
-        const response = await this.fetchRaw(url, init);
-        if (!TRANSIENT_STATUSES.has(response.status) || attempt >= MAX_TRANSIENT_RETRIES)
-          return response;
-        await retryDelay(response, attempt, init?.signal);
+        response = await this.fetchRaw(url, init);
       } catch (error) {
         if (isAbortError(error)) throw error;
-        if (attempt >= MAX_TRANSIENT_RETRIES) throw error;
-        await retryDelay(null, attempt, init?.signal);
+        if (!(await budget.wait(null, init?.signal))) throw error;
+        continue;
       }
+      if (!TRANSIENT_STATUSES.has(response.status)) return response;
+      if (!(await budget.wait(this.retryAfterMs(response), init?.signal))) return response;
+      void response.body?.cancel().catch(() => undefined);
     }
+  }
+
+  private retryAfterMs(response: Response): number | null {
+    return parseRetryAfterMs(response.headers.get("retry-after"), this.timing.now());
   }
 
   private async fetchRaw(url: string, init?: RequestInit): Promise<Response> {
@@ -81,40 +100,6 @@ export class HttpClient {
       ? this.options.endpoint
       : `${this.options.endpoint}/`;
   }
-}
-
-function retryDelay(
-  response: Response | null,
-  attempt: number,
-  signal?: AbortSignal | null,
-): Promise<void> {
-  const headerDelay = response ? retryAfterMs(response.headers.get("retry-after")) : null;
-  const delayMs = headerDelay ?? Math.min(MAX_RETRY_DELAY_MS, 500 * 2 ** attempt);
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) {
-      reject(signal.reason ?? new DOMException("Operation aborted", "AbortError"));
-      return;
-    }
-    const timer = setTimeout(finish, delayMs);
-    signal?.addEventListener("abort", abort, { once: true });
-    function finish(): void {
-      signal?.removeEventListener("abort", abort);
-      resolve();
-    }
-    function abort(): void {
-      clearTimeout(timer);
-      reject(signal?.reason ?? new DOMException("Operation aborted", "AbortError"));
-    }
-  });
-}
-
-function retryAfterMs(value: string | null): number | null {
-  if (value === null) return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(MAX_RETRY_DELAY_MS, seconds * 1000);
-  const dateMs = Date.parse(value);
-  if (!Number.isFinite(dateMs)) return null;
-  return Math.min(MAX_RETRY_DELAY_MS, Math.max(0, dateMs - Date.now()));
 }
 
 function isAbortError(error: unknown): boolean {
