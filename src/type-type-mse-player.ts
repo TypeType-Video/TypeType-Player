@@ -13,6 +13,7 @@ import {
   observePlaybackLifecycle,
 } from "./playback-lifecycle-observer";
 import type { PlaybackLoopFailureContext } from "./playback-loop";
+import { PlaybackWindowTimeoutError } from "./playback-window-error";
 import { createPlayerDeps, type PlayerDeps } from "./player-deps";
 import { emitManifest, emitQuality } from "./player-events";
 import { ensurePlayerAlive, PlayerOperation } from "./player-operation";
@@ -748,13 +749,14 @@ function isRecoverableDecodeError(error: Error): boolean {
   return error instanceof MediaElementPlaybackError && error.code === 3;
 }
 
-const TRANSIENT_GATEWAY_STATUSES = new Set([502, 503, 504]);
+const TRANSIENT_HTTP_STATUSES = new Set([429, 502, 503, 504]);
 
 function isRecoverablePlaybackError(error: Error): boolean {
   return (
     error instanceof PlaybackWindowRecoveryError ||
+    error instanceof PlaybackWindowTimeoutError ||
     isRecoverableDecodeError(error) ||
-    (error instanceof TypeTypeHttpError && TRANSIENT_GATEWAY_STATUSES.has(error.status))
+    (error instanceof TypeTypeHttpError && TRANSIENT_HTTP_STATUSES.has(error.status))
   );
 }
 
