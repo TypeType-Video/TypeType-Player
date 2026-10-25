@@ -1,3 +1,9 @@
+import {
+  DEFAULT_REQUEST_WATCHDOG,
+  RequestWatchdog,
+  type RequestWatchdogTiming,
+  readWatchedBody,
+} from "./request-watchdog";
 import { parseRetryAfterMs, RetryBudget } from "./retry-backoff";
 import { type RetryTiming, SYSTEM_RETRY_TIMING } from "./retry-timing";
 
@@ -18,81 +24,97 @@ export type HttpClientOptions = {
   endpoint: string;
   headers?: HeadersInit;
   retryTiming?: RetryTiming;
+  watchdog?: RequestWatchdogTiming;
+};
+
+export type HttpExchange = {
+  status: number;
+  statusText: string;
+  headers: Headers;
+  body: ArrayBuffer;
 };
 
 export class HttpClient {
   private readonly timing: RetryTiming;
+  private readonly watchdog: RequestWatchdogTiming;
 
   constructor(private readonly options: HttpClientOptions) {
     this.timing = options.retryTiming ?? SYSTEM_RETRY_TIMING;
+    this.watchdog = options.watchdog ?? DEFAULT_REQUEST_WATCHDOG;
+  }
+
+  get retryTiming(): RetryTiming {
+    return this.timing;
   }
 
   async json(path: string, init?: RequestInit): Promise<unknown> {
-    const response = await this.fetch(path, init);
-    return response.json();
+    const exchange = await this.fetch(path, init);
+    return JSON.parse(new TextDecoder().decode(exchange.body));
   }
 
-  async text(url: string, init?: RequestInit): Promise<string> {
-    const response = await this.fetchAbsolute(url, init);
-    return response.text();
-  }
-
-  async bytes(url: string, init?: RequestInit): Promise<ArrayBuffer> {
-    const response = await this.fetchAbsolute(url, init);
-    return response.arrayBuffer();
-  }
-
-  response(url: string, init?: RequestInit): Promise<Response> {
+  response(url: string, init?: RequestInit): Promise<HttpExchange> {
     return this.fetchWithTransientRetry(url, init);
+  }
+
+  async once(url: string, init?: RequestInit): Promise<HttpExchange> {
+    const watchdog = new RequestWatchdog(init?.signal, this.watchdog);
+    try {
+      const response = await watchdog.run(this.fetchRaw(url, { ...init, signal: watchdog.signal }));
+      watchdog.progress();
+      const body = await readWatchedBody(response, watchdog);
+      return {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+        body,
+      };
+    } finally {
+      watchdog.dispose();
+    }
   }
 
   absolute(path: string): string {
     return new URL(path.replace(/^\/+/, ""), this.normalizedEndpoint()).href;
   }
 
-  private fetch(path: string, init?: RequestInit): Promise<Response> {
-    return this.fetchAbsolute(this.absolute(path), init);
+  retryAfterMs(headers: Headers): number | null {
+    return parseRetryAfterMs(headers.get("retry-after"), this.timing.now());
   }
 
-  private async fetchAbsolute(url: string, init?: RequestInit): Promise<Response> {
-    const response = await this.fetchWithTransientRetry(url, init);
-    if (!response.ok) {
+  private async fetch(path: string, init?: RequestInit): Promise<HttpExchange> {
+    const exchange = await this.fetchWithTransientRetry(this.absolute(path), init);
+    if (exchange.status < 200 || exchange.status > 299) {
       throw new TypeTypeHttpError(
-        response.statusText,
-        response.status,
-        this.retryAfterMs(response),
+        exchange.statusText,
+        exchange.status,
+        this.retryAfterMs(exchange.headers),
       );
     }
-    return response;
+    return exchange;
   }
 
-  private async fetchWithTransientRetry(url: string, init?: RequestInit): Promise<Response> {
+  private async fetchWithTransientRetry(url: string, init?: RequestInit): Promise<HttpExchange> {
     const budget = new RetryBudget(this.timing);
     while (true) {
-      let response: Response;
+      let exchange: HttpExchange;
       try {
-        response = await this.fetchRaw(url, init);
+        exchange = await this.once(url, init);
       } catch (error) {
         if (isAbortError(error)) throw error;
         if (!(await budget.wait(null, init?.signal))) throw error;
         continue;
       }
-      if (!TRANSIENT_STATUSES.has(response.status)) return response;
-      if (!(await budget.wait(this.retryAfterMs(response), init?.signal))) return response;
-      void response.body?.cancel().catch(() => undefined);
+      if (!TRANSIENT_STATUSES.has(exchange.status)) return exchange;
+      if (!(await budget.wait(this.retryAfterMs(exchange.headers), init?.signal))) return exchange;
     }
   }
 
-  private retryAfterMs(response: Response): number | null {
-    return parseRetryAfterMs(response.headers.get("retry-after"), this.timing.now());
-  }
-
-  private async fetchRaw(url: string, init?: RequestInit): Promise<Response> {
+  private async fetchRaw(url: string, init: RequestInit): Promise<Response> {
     const headers = new Headers(this.options.headers);
-    new Headers(init?.headers).forEach((value, key) => {
+    new Headers(init.headers).forEach((value, key) => {
       headers.set(key, value);
     });
-    return fetch(url, { ...init, headers, cache: init?.cache ?? "no-store" });
+    return fetch(url, { ...init, headers, cache: init.cache ?? "no-store" });
   }
 
   private normalizedEndpoint(): string {
