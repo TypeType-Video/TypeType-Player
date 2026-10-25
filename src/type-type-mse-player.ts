@@ -99,6 +99,7 @@ import type {
         this.playbackRecovery.observeProgress(positionMs);
         this.followLiveEdge(positionMs);
       },
+      busy: () => this.isTransitioning(),
       loopError: (error, context) => this.handlePlaybackLoopError(error, context),
     });
     if (config.isLive) {
@@ -116,6 +117,7 @@ import type {
       browserPlaybackLifecycleTargets(video),
     );
     this.deps.mediaEvents.start();
+    this.deps.stallWatchdog?.start();
   }
   /** Subscribes to player events. */ on(
     type: TypeTypeMseEventType,

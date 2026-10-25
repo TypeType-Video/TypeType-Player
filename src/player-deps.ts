@@ -7,6 +7,7 @@ import { MediaSourceController } from "./media-source-controller";
 import { PlaybackClient } from "./playback-client";
 import { PlaybackLoop, type PlaybackLoopFailureContext } from "./playback-loop";
 import { StablePlaybackRate } from "./playback-rate";
+import { PlaybackStallWatchdog } from "./playback-stall-watchdog";
 import { bufferedEndMs } from "./player-snapshot";
 import { SegmentScheduler } from "./segment-scheduler";
 import type { LoadedSession } from "./session-loader";
@@ -19,6 +20,7 @@ export type PlayerDeps = {
   media: MediaSourceController;
   scheduler: SegmentScheduler;
   loop: PlaybackLoop;
+  stallWatchdog: PlaybackStallWatchdog | null;
   policy: BufferPolicy;
   playbackRate: () => number;
   destroy: () => void;
@@ -33,6 +35,7 @@ type Args = {
   state: (state: TypeTypeMseState) => void;
   error: (error: Error) => boolean;
   progress: (positionMs: number) => void;
+  busy: () => boolean;
   loopError: (error: Error, context: PlaybackLoopFailureContext) => void;
 };
 
@@ -78,10 +81,25 @@ export function createPlayerDeps(args: Args): PlayerDeps {
     bufferedEndMs: currentBufferedEndMs,
     error: args.loopError,
   });
+  const stallWatchdog = args.config.isLive
+    ? null
+    : new PlaybackStallWatchdog({ video: args.video, busy: args.busy });
   const destroy = () => {
+    stallWatchdog?.stop();
     loop.stop();
     mediaEvents.stop();
     media.detach();
   };
-  return { http, playback, mediaEvents, media, scheduler, loop, policy, playbackRate, destroy };
+  return {
+    http,
+    playback,
+    mediaEvents,
+    media,
+    scheduler,
+    loop,
+    stallWatchdog,
+    policy,
+    playbackRate,
+    destroy,
+  };
 }
