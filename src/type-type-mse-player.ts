@@ -51,6 +51,7 @@ import type {
   private session: LoadedSession | null = null;
   private pendingPrerollTargetMs: number | null = null;
   private pendingLoadSeekMs: number | null = null;
+  private bufferKeepingRevision: number | null = null;
   private loadTask: Promise<void> | null = null;
   private liveEdgeCatchUpTask: Promise<void> | null = null;
   private lifecycleResumeTask: Promise<void> | null = null;
@@ -440,6 +441,7 @@ import type {
         signal,
         recovery: this.playbackRecovery,
         ...(quality ? { beforeAttach: quiesce } : {}),
+        ...(this.bufferKeepingRevision === revision ? { keepBufferedMedia: true } : {}),
       });
       this.operation.ensureCurrent(this.destroyed, revision);
       const resolvedStartTimeMs =
@@ -537,6 +539,7 @@ import type {
     }
     const revision = this.operation.next();
     const signal = this.operation.signal;
+    this.bufferKeepingRevision = isRecoverableDecodeError(error) ? null : revision;
     this.deps.loop.stop();
     this.playerState.set("buffering");
     void recoverPlaybackSession({

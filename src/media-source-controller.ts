@@ -49,10 +49,15 @@ export class MediaSourceController {
     );
   }
 
-  async attach(manifest: PlaybackManifest): Promise<void> {
+  async attach(manifest: PlaybackManifest, keepBufferedMedia = false): Promise<void> {
     const mediaSource = this.freshAttachmentRequired ? null : this.reusableMediaSource();
     this.freshAttachmentRequired = false;
     if (mediaSource && this.hasCompatibleLayout(manifest)) {
+      if (keepBufferedMedia) {
+        this.clear();
+        this.applyTiming(mediaSource, manifest);
+        return;
+      }
       await this.resetSourceBuffers(mediaSource, manifest);
       return;
     }

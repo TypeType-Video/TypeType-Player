@@ -22,6 +22,7 @@ type Args = {
   signal: AbortSignal;
   recovery: PlaybackRecovery;
   beforeAttach?: () => Promise<void>;
+  keepBufferedMedia?: boolean;
 };
 
 type PlayerSessionDeps = {
@@ -99,6 +100,7 @@ async function loadSelectedSession(
         }
       : {}),
     ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {}),
+    ...(args.keepBufferedMedia ? { keepBufferedMedia: true } : {}),
   });
   const startTimeMs =
     session.response.startTimeMs ?? session.manifest.startTimeMs ?? requestedStartTimeMs;

@@ -39,6 +39,7 @@ type LoadSessionArgs = {
   policy: BufferPolicy;
   signal: AbortSignal;
   beforeAttach?: () => Promise<void>;
+  keepBufferedMedia?: boolean;
 };
 
 export async function loadPlaybackSession(args: LoadSessionArgs): Promise<LoadedSession> {
@@ -83,7 +84,7 @@ async function attachSession(
   const attachedManifest =
     handoffStartTimeMs === undefined ? manifest : { ...manifest, startTimeMs: handoffStartTimeMs };
   args.scheduler.reset();
-  await args.media.attach(attachedManifest);
+  await args.media.attach(attachedManifest, args.keepBufferedMedia === true);
   ensureNotAborted(args.signal);
   await args.scheduler.appendInit(attachedManifest, args.signal);
   return {
