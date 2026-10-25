@@ -3,6 +3,7 @@ import type { PlaybackLoopArgs, PlaybackLoopFailureContext } from "./playback-lo
 import { rateAwareBufferGoalMs, refreshThresholdMs } from "./playback-rate";
 import { SegmentGenerationConflictError } from "./playback-window-error";
 import { currentTimeMs } from "./player-snapshot";
+import type { SegmentFillResult } from "./segment-scheduler";
 import type { LoadedSession } from "./session-loader";
 import { refreshPlaybackWindow } from "./session-loader";
 
@@ -17,6 +18,7 @@ export class PlaybackLoop {
   private taskController = new PlaybackLoopTaskController();
   private revision = 0;
   private active = false;
+  private quotaGoalLimitMs: number | null = null;
 
   constructor(private readonly args: PlaybackLoopArgs) {}
 
@@ -83,14 +85,16 @@ export class PlaybackLoop {
     revision: number,
   ): Promise<void> {
     const currentMs = currentTimeMs(this.args.video);
-    const bufferGoalMs = rateAwareBufferGoalMs(
-      this.args.policy.bufferGoalMs,
-      this.args.playbackRate?.() ?? 1,
+    const trim = this.args.media.trim(currentMs, this.args.policy.backBufferMs);
+    trim.catch(() => undefined);
+    const bufferGoalMs = this.quotaLimitedGoalMs(
+      rateAwareBufferGoalMs(this.args.policy.bufferGoalMs, this.args.playbackRate?.() ?? 1),
     );
     const goalMs = currentMs + bufferGoalMs + this.liveStallRecoveryMs(bufferGoalMs);
-    await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
+    let result = await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
     this.ensureCurrent(revision, signal);
     if (
+      result !== "deferred" &&
       !session.manifest.endOfStream &&
       this.args.bufferedEndMs() < currentMs + refreshThresholdMs(bufferGoalMs)
     ) {
@@ -103,19 +107,20 @@ export class PlaybackLoop {
           return;
         }
         this.ensureCurrent(revision, signal);
-        await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
+        result = await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
         this.ensureCurrent(revision, signal);
       }
     }
-    await this.args.media.trim(currentMs, this.args.policy.backBufferMs);
+    await trim;
     this.ensureCurrent(revision, signal);
+    if (result === "deferred") this.shrinkQuotaGoal(bufferGoalMs);
     const bufferedEndMs = this.args.bufferedEndMs();
     this.args.emitter.emit({
       type: "buffer",
       currentTimeMs: currentMs,
       bufferedEndMs,
     });
-    if (session.manifest.endOfStream && this.args.media.endOfStream()) {
+    if (result !== "deferred" && session.manifest.endOfStream && this.args.media.endOfStream()) {
       this.stop();
       return;
     }
@@ -127,11 +132,10 @@ export class PlaybackLoop {
     goalMs: number,
     signal: AbortSignal,
     revision: number,
-  ): Promise<void> {
+  ): Promise<SegmentFillResult> {
     for (let refreshes = 0; ; refreshes += 1) {
       try {
-        await this.args.scheduler.fill(session.manifest, currentMs, goalMs, signal);
-        return;
+        return await this.args.scheduler.fill(session.manifest, currentMs, goalMs, signal);
       } catch (error) {
         if (!(error instanceof SegmentGenerationConflictError)) throw error;
         if (refreshes >= MAX_GENERATION_REFRESHES) throw error;
@@ -145,6 +149,14 @@ export class PlaybackLoop {
       }
       this.ensureCurrent(revision, signal);
     }
+  }
+
+  private quotaLimitedGoalMs(goalMs: number): number {
+    return Math.min(goalMs, this.quotaGoalLimitMs ?? goalMs);
+  }
+
+  private shrinkQuotaGoal(goalMs: number): void {
+    this.quotaGoalLimitMs = Math.max(MIN_QUOTA_BUFFER_GOAL_MS, Math.round(goalMs / 2));
   }
 
   private requestFill(revision: number): void {
@@ -234,3 +246,4 @@ export class PlaybackLoop {
 
 const HAVE_FUTURE_DATA = 3;
 const MAX_GENERATION_REFRESHES = 2;
+const MIN_QUOTA_BUFFER_GOAL_MS = 4_000;

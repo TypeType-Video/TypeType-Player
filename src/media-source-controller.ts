@@ -4,6 +4,10 @@ import { createMediaSource, isMseTypeSupported } from "./media-source-runtime";
 import { MediaSourceTiming } from "./media-source-timing";
 import type { TrackKind } from "./types";
 
+export type AppendResult = "appended" | "deferred";
+
+const QUOTA_EVICTION_MARGIN_SECONDS = 2;
+
 export type MediaBufferedRange = {
   kind: TrackKind;
   startMs: number;
@@ -111,10 +115,24 @@ export class MediaSourceController {
     this.applyTiming(mediaSource, manifest);
   }
 
-  append(kind: TrackKind, data: ArrayBuffer): Promise<void> {
+  async append(kind: TrackKind, data: ArrayBuffer): Promise<AppendResult> {
     const queue = kind === "audio" ? this.audioQueue : this.videoQueue;
-    if (!queue) return Promise.reject(new Error(`${kind} SourceBuffer is not ready`));
-    return queue.append(data);
+    if (!queue) throw new Error(`${kind} SourceBuffer is not ready`);
+    try {
+      await queue.append(data);
+      return "appended";
+    } catch (error) {
+      if (!isQuotaExceededError(error)) throw error;
+    }
+    const evictEndSeconds = Math.max(0, this.video.currentTime - QUOTA_EVICTION_MARGIN_SECONDS);
+    await queue.remove(0, evictEndSeconds);
+    try {
+      await queue.append(data);
+      return "appended";
+    } catch (error) {
+      if (isQuotaExceededError(error)) return "deferred";
+      throw error;
+    }
   }
 
   async trim(currentTimeMs: number, backBufferMs: number): Promise<void> {
@@ -210,4 +228,8 @@ export class MediaSourceController {
   private applyTiming(mediaSource: MediaSource, manifest: PlaybackManifest): void {
     this.timing.apply(mediaSource, manifest);
   }
+}
+
+function isQuotaExceededError(error: unknown): boolean {
+  return error instanceof Error && error.name === "QuotaExceededError";
 }

@@ -7,6 +7,8 @@ import type { TrackKind } from "./types";
 
 const BUFFERED_RANGE_TOLERANCE_MS = 50;
 
+export type SegmentFillResult = "filled" | "deferred";
+
 export class SegmentScheduler {
   private readonly appended = new Set<string>();
   private revision = 0;
@@ -29,7 +31,8 @@ export class SegmentScheduler {
     if (manifest.video) {
       tasks.push(this.appendUrl("video", manifest.video.initUrl, 0, 0, revision, signal));
     }
-    await Promise.all(tasks);
+    const appended = await Promise.all(tasks);
+    if (appended.includes(false)) throw new Error("SourceBuffer quota exceeded");
   }
 
   async fill(
@@ -37,7 +40,7 @@ export class SegmentScheduler {
     currentMs: number,
     goalMs: number,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<SegmentFillResult> {
     const revision = this.revision;
     const tasks = [
       this.fillTrack("audio", manifest.audio.segments, currentMs, goalMs, revision, signal),
@@ -47,7 +50,8 @@ export class SegmentScheduler {
         this.fillTrack("video", manifest.video.segments, currentMs, goalMs, revision, signal),
       );
     }
-    await Promise.all(tasks);
+    const results = await Promise.all(tasks);
+    return results.includes("deferred") ? "deferred" : "filled";
   }
 
   private async fillTrack(
@@ -57,7 +61,7 @@ export class SegmentScheduler {
     goalMs: number,
     revision: number,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<SegmentFillResult> {
     const candidates = segments
       .filter(
         (segment) => segment.startMs + segment.durationMs > currentMs && segment.startMs <= goalMs,
@@ -66,7 +70,7 @@ export class SegmentScheduler {
     for (const segment of candidates) {
       const segmentEndMs = segment.startMs + segment.durationMs;
       if (this.isBuffered(kind, segment.startMs, segmentEndMs)) continue;
-      await this.appendUrl(
+      const appended = await this.appendUrl(
         kind,
         segment.url,
         segment.startMs,
@@ -74,7 +78,9 @@ export class SegmentScheduler {
         revision,
         signal,
       );
+      if (!appended) return "deferred";
     }
+    return "filled";
   }
 
   private async appendUrl(
@@ -84,11 +90,11 @@ export class SegmentScheduler {
     durationMs: number,
     revision: number,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<boolean> {
     this.ensureActive(revision, signal);
     const key = `${kind}:${url}`;
     if (this.appended.has(key)) {
-      if (durationMs <= 0 || this.isBuffered(kind, startMs, startMs + durationMs)) return;
+      if (durationMs <= 0 || this.isBuffered(kind, startMs, startMs + durationMs)) return true;
       this.appended.delete(key);
     }
     const bytes = await fetchSegmentBytes(
@@ -99,10 +105,12 @@ export class SegmentScheduler {
       this.http.retryTiming,
     );
     this.ensureActive(revision, signal);
-    await this.media.append(kind, bytes);
+    const result = await this.media.append(kind, bytes);
     this.ensureActive(revision, signal);
+    if (result === "deferred") return false;
     this.appended.add(key);
     this.emitter.emit({ type: "segment", kind, url, startMs, durationMs });
+    return true;
   }
 
   private isBuffered(kind: TrackKind, startMs: number, endMs: number): boolean {
