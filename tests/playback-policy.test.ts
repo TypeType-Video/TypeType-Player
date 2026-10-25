@@ -12,8 +12,10 @@ describe("playback policy", () => {
       backBufferMs: 30_000,
       manifestRefreshMs: 1_000,
       manifestAttempts: 5,
-      mediaAttempts: 3,
-      retryIntervalMs: 500,
+      mediaAttempts: 6,
+      retryIntervalMs: 1_500,
+      fragmentTimeoutMs: 45_000,
+      fragmentProgressTimeoutMs: 15_000,
       liveTargetLatencyMs: 5_000,
       liveMaxLatencyMs: 15_000,
       liveCatchupMinRate: 1,
@@ -40,6 +42,7 @@ describe("playback policy", () => {
   test("rejects invalid timing and attempts", () => {
     expect(resolvePlaybackPolicy({ startupBufferMs: 0 }).startupBufferMs).toBe(2_000);
     expect(resolvePlaybackPolicy({ manifestAttempts: 1.5 }).manifestAttempts).toBe(5);
-    expect(resolvePlaybackPolicy({ mediaAttempts: -1 }).mediaAttempts).toBe(3);
+    expect(resolvePlaybackPolicy({ mediaAttempts: -1 }).mediaAttempts).toBe(6);
+    expect(resolvePlaybackPolicy({ fragmentTimeoutMs: 0 }).fragmentTimeoutMs).toBe(45_000);
   });
 });

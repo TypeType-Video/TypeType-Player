@@ -28,8 +28,10 @@ export type HlsTransportOptions<TLoader extends TransportLoader> = {
   crypto?: Crypto;
 };
 
-/** DASH buffer and retry settings, keyed by the names used by dash.js. */
+/** DASH buffer, timeout, and retry settings, keyed by the names used by dash.js. */
 export type DashStreamingSettings = {
+  fragmentRequestTimeout: number;
+  fragmentRequestProgressTimeout: number;
   buffer: {
     bufferTimeAtTopQuality: number;
     bufferTimeAtTopQualityLongForm: number;
@@ -104,6 +106,8 @@ export function createHlsConfig<TConfig extends TransportConfig, TLoader extends
 export function createDashSettings(policyInput: PlaybackPolicyInput = {}): DashStreamingSettings {
   const policy = resolvePlaybackPolicy(policyInput);
   return {
+    fragmentRequestTimeout: policy.fragmentTimeoutMs,
+    fragmentRequestProgressTimeout: policy.fragmentProgressTimeoutMs,
     buffer: {
       bufferTimeAtTopQuality: bufferSeconds(policy.steadyBufferMs),
       bufferTimeAtTopQualityLongForm: bufferSeconds(policy.steadyBufferMs),

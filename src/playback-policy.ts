@@ -3,6 +3,8 @@ export type PlaybackRetryPolicy = {
   manifestAttempts: number;
   mediaAttempts: number;
   retryIntervalMs: number;
+  fragmentTimeoutMs: number;
+  fragmentProgressTimeoutMs: number;
 };
 
 /** Transport-independent buffering, live-edge, and retry policy. */
@@ -28,8 +30,10 @@ const DEFAULT_POLICY: PlaybackPolicy = {
   backBufferMs: 30_000,
   manifestRefreshMs: 1_000,
   manifestAttempts: 5,
-  mediaAttempts: 3,
-  retryIntervalMs: 500,
+  mediaAttempts: 6,
+  retryIntervalMs: 1_500,
+  fragmentTimeoutMs: 45_000,
+  fragmentProgressTimeoutMs: 15_000,
   liveTargetLatencyMs: 5_000,
   liveMaxLatencyMs: 15_000,
   liveCatchupMinRate: 1,
@@ -47,6 +51,11 @@ export function resolvePlaybackPolicy(input: PlaybackPolicyInput = {}): Playback
     manifestAttempts: positiveInteger(input.manifestAttempts, DEFAULT_POLICY.manifestAttempts),
     mediaAttempts: positiveInteger(input.mediaAttempts, DEFAULT_POLICY.mediaAttempts),
     retryIntervalMs: positiveMs(input.retryIntervalMs, DEFAULT_POLICY.retryIntervalMs),
+    fragmentTimeoutMs: positiveMs(input.fragmentTimeoutMs, DEFAULT_POLICY.fragmentTimeoutMs),
+    fragmentProgressTimeoutMs: positiveMs(
+      input.fragmentProgressTimeoutMs,
+      DEFAULT_POLICY.fragmentProgressTimeoutMs,
+    ),
     liveTargetLatencyMs: positiveMs(input.liveTargetLatencyMs, DEFAULT_POLICY.liveTargetLatencyMs),
     liveMaxLatencyMs: positiveMs(input.liveMaxLatencyMs, DEFAULT_POLICY.liveMaxLatencyMs),
     liveCatchupMinRate: playbackRate(input.liveCatchupMinRate, DEFAULT_POLICY.liveCatchupMinRate),

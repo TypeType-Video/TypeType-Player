@@ -66,8 +66,17 @@ describe("HLS transport", () => {
 });
 
 describe("DASH transport", () => {
+  test("waits longer than the dash.js default for a cold CDN first byte", () => {
+    const settings = createDashSettings();
+
+    expect(settings.fragmentRequestTimeout).toBeGreaterThan(20_000);
+    expect(settings.fragmentRequestProgressTimeout).toBeGreaterThan(0);
+  });
+
   test("maps the shared policy to dash.js settings", () => {
     expect(createDashSettings()).toEqual({
+      fragmentRequestTimeout: 45_000,
+      fragmentRequestProgressTimeout: 15_000,
       buffer: {
         bufferTimeAtTopQuality: 24,
         bufferTimeAtTopQualityLongForm: 24,
@@ -75,15 +84,15 @@ describe("DASH transport", () => {
       },
       retryAttempts: {
         MPD: 5,
-        MediaSegment: 3,
-        InitializationSegment: 3,
-        IndexSegment: 3,
+        MediaSegment: 6,
+        InitializationSegment: 6,
+        IndexSegment: 6,
       },
       retryIntervals: {
-        MPD: 500,
-        MediaSegment: 500,
-        InitializationSegment: 500,
-        IndexSegment: 500,
+        MPD: 1_500,
+        MediaSegment: 1_500,
+        InitializationSegment: 1_500,
+        IndexSegment: 1_500,
       },
     });
   });
