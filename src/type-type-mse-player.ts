@@ -319,6 +319,7 @@ import type {
     positionMs: number,
     quality?: TypeTypeMseQuality,
     audioOnly = this.audioOnly,
+    userInitiated = true,
   ): Promise<void> {
     ensurePlayerAlive(this.destroyed);
     this.bufferedSeekRecovery.cancel();
@@ -330,7 +331,7 @@ import type {
       });
       return;
     }
-    this.resetPlaybackRecovery();
+    if (userInitiated) this.resetPlaybackRecovery();
     const revision = this.operation.next();
     const signal = this.operation.signal;
     this.recoveryPositionMs = targetMs;
@@ -624,7 +625,7 @@ import type {
             .seek(
               recoveryTargetMs,
               `lifecycle:${recoveryTargetMs}`,
-              (target) => this.performSeek(target),
+              (target) => this.performSeek(target, undefined, this.audioOnly, false),
               () => this.operation.abort(),
             )
             .then(() => !this.video.paused);
@@ -692,7 +693,7 @@ import type {
       .seek(
         targetMs,
         `live-edge:${targetMs}`,
-        (target) => this.performSeek(target),
+        (target) => this.performSeek(target, undefined, this.audioOnly, false),
         () => this.operation.abort(),
       )
       .catch((error: unknown) => {
