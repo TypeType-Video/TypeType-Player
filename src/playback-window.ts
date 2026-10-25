@@ -145,7 +145,7 @@ function parseTrack(kind: TrackKind, value: object, baseUrl: string): ManifestTr
 
 function parseManifest(value: object, baseUrl: string): PlaybackManifest | null {
   const durationMs = numberField(value, "durationMs") ?? 0;
-  const startTimeMs = numberField(value, "startTimeMs") ?? 0;
+  const startTimeMs = numberField(value, "startTimeMs");
   const endOfStream = booleanField(value, "endOfStream");
   const live = parseLivePlaybackWindow(field(value, "live"));
   const audioValue = objectField(value, "audio");
@@ -153,9 +153,15 @@ function parseManifest(value: object, baseUrl: string): PlaybackManifest | null 
   if (!audioValue) return null;
   const audio = parseTrack("audio", audioValue, baseUrl);
   const video = videoValue ? parseTrack("video", videoValue, baseUrl) : null;
-  return audio && (!videoValue || video)
-    ? { durationMs, endOfStream, startTimeMs, live, audio, video }
-    : null;
+  if (!audio || (videoValue && !video)) return null;
+  return {
+    durationMs,
+    endOfStream,
+    ...(startTimeMs === null ? {} : { startTimeMs }),
+    live,
+    audio,
+    video,
+  };
 }
 
 export function parsePlaybackWindow(value: unknown, baseUrl: string): PlaybackWindow {

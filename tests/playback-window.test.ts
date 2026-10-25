@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { parsePlaybackWindow } from "../src/playback-window";
+import { loadPlaybackSession } from "../src/session-loader";
 
 test("parses native playback windows", () => {
   const window = parsePlaybackWindow(
@@ -136,4 +137,57 @@ test("parses audio-only playback windows", () => {
   );
   expect(window.manifest?.video).toBeNull();
   expect(window.manifest?.audio.segments[0]?.startMs).toBe(69_895);
+});
+
+test("leaves the manifest start unset when the window does not provide one", async () => {
+  const value = {
+    sessionId: "session",
+    generation: 4,
+    ready: true,
+    durationMs: 600_000,
+    endOfStream: false,
+    audio: { mime: "audio/mp4", initUrl: "/audio/init", segments: [] },
+    video: null,
+  };
+  const window = parsePlaybackWindow(value, "https://beta.typetype.video/api/window");
+  Object.defineProperty(globalThis, "MediaSource", {
+    value: { isTypeSupported: () => true },
+    configurable: true,
+  });
+
+  const session = await loadPlaybackSession({
+    playback: {
+      position: async () => window,
+      prefetch: async () => window,
+      segments: async () => window,
+    },
+    media: { attach: async () => undefined, bufferedRanges: () => [] },
+    scheduler: { appendInit: async () => undefined, reset: () => undefined },
+    video: { currentTime: 0 },
+    response: {
+      sessionId: "session",
+      videoId: "video",
+      generation: 3,
+      ready: true,
+      retryAfterMs: 0,
+    },
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: true,
+    startTimeMs: 754_000,
+    policy: {
+      bufferGoalMs: 10_000,
+      backBufferMs: 30_000,
+      pollIntervalMs: 500,
+      manifestRefreshMs: 8_000,
+      manifestPollLimit: 2,
+      segmentPollLimit: 2,
+    },
+    signal: new AbortController().signal,
+  });
+
+  expect(window.manifest?.startTimeMs).toBeUndefined();
+  expect(session.response.startTimeMs).toBe(754_000);
+  expect(session.manifest.startTimeMs).toBe(754_000);
 });
