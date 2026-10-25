@@ -12,6 +12,7 @@ export class PlaybackWindowRecoveryError extends PlaybackWindowTerminalError {
     message: string,
     readonly recoveryAction: PlaybackWindowRecoveryAction,
     readonly retryVideoItags: number[],
+    readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "PlaybackWindowRecoveryError";

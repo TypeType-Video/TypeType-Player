@@ -91,7 +91,13 @@ export class SegmentScheduler {
       if (durationMs <= 0 || this.isBuffered(kind, startMs, startMs + durationMs)) return;
       this.appended.delete(key);
     }
-    const bytes = await fetchSegmentBytes(this.http, url, this.pollLimit, signal);
+    const bytes = await fetchSegmentBytes(
+      this.http,
+      url,
+      this.pollLimit,
+      signal,
+      this.http.retryTiming,
+    );
     this.ensureActive(revision, signal);
     await this.media.append(kind, bytes);
     this.ensureActive(revision, signal);

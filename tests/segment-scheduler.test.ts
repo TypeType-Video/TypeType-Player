@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { EventEmitter } from "../src/event-emitter";
-import type { HttpClient } from "../src/http-client";
+import type { HttpClient, HttpExchange } from "../src/http-client";
 import type { PlaybackManifest } from "../src/manifest";
 import type { MediaBufferedRange, MediaSourceController } from "../src/media-source-controller";
 import { SegmentScheduler } from "../src/segment-scheduler";
@@ -26,11 +26,11 @@ test("never appends a late segment behind the buffered track edge", async () => 
   const buffered: MediaBufferedRange[] = [];
   let requestedUrl = "";
   const http = {
-    response: async (url: string) => {
+    once: async (url: string) => {
       requestedUrl = url;
-      return new Response(new Uint8Array([1]));
+      return segmentExchange();
     },
-  } as HttpClient;
+  } as unknown as HttpClient;
   const segment40 = { url: "/40", startMs: 389_398, durationMs: 9_985 };
   const segment41 = { url: "/41", startMs: 399_383, durationMs: 9_985 };
   const segment42 = { url: "/42", startMs: 409_367, durationMs: 9_985 };
@@ -63,12 +63,12 @@ test("appends a self-initializing live segment only once", async () => {
   const requested: string[] = [];
   let requestedUrl = "";
   const http = {
-    response: async (url: string) => {
+    once: async (url: string) => {
       requestedUrl = url;
       requested.push(url);
-      return new Response(new Uint8Array([1]));
+      return segmentExchange();
     },
-  } as HttpClient;
+  } as unknown as HttpClient;
   const appended: string[] = [];
   const buffered: MediaBufferedRange[] = [];
   const media = {
@@ -94,11 +94,11 @@ test("appends a self-initializing live segment only once", async () => {
 });
 
 test("rejects fetched bytes from a superseded scheduler revision", async () => {
-  let releaseResponse: ((response: Response) => void) | null = null;
-  const pendingResponse = new Promise<Response>((resolve) => {
+  let releaseResponse: ((response: HttpExchange) => void) | null = null;
+  const pendingResponse = new Promise<HttpExchange>((resolve) => {
     releaseResponse = resolve;
   });
-  const http = { response: async () => pendingResponse } as HttpClient;
+  const http = { once: async () => pendingResponse } as unknown as HttpClient;
   let appends = 0;
   const media = {
     append: async () => {
@@ -115,7 +115,7 @@ test("rejects fetched bytes from a superseded scheduler revision", async () => {
   await Bun.sleep(0);
   scheduler.reset();
   if (!releaseResponse) throw new Error("Deferred response was not initialized");
-  releaseResponse(new Response(new Uint8Array([1])));
+  releaseResponse(segmentExchange());
 
   await expect(fill).rejects.toHaveProperty("name", "AbortError");
   expect(appends).toBe(0);
@@ -125,11 +125,11 @@ test("re-fetches a segment after its SourceBuffer range was evicted", async () =
   const requested: string[] = [];
   let buffered: MediaBufferedRange[] = [];
   const http = {
-    response: async (url: string) => {
+    once: async (url: string) => {
       requested.push(url);
-      return new Response(new Uint8Array([1]));
+      return segmentExchange();
     },
-  } as HttpClient;
+  } as unknown as HttpClient;
   const media = {
     append: async () => {
       buffered = [{ kind: "audio", startMs: 0, endMs: 10_000 }];
@@ -145,3 +145,12 @@ test("re-fetches a segment after its SourceBuffer range was evicted", async () =
 
   expect(requested).toEqual(["/segment", "/segment"]);
 });
+
+function segmentExchange(): HttpExchange {
+  return {
+    status: 200,
+    statusText: "OK",
+    headers: new Headers(),
+    body: new Uint8Array([1]).buffer,
+  };
+}

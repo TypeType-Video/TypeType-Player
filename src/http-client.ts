@@ -52,10 +52,6 @@ export class HttpClient {
     return JSON.parse(new TextDecoder().decode(exchange.body));
   }
 
-  response(url: string, init?: RequestInit): Promise<HttpExchange> {
-    return this.fetchWithTransientRetry(url, init);
-  }
-
   async once(url: string, init?: RequestInit): Promise<HttpExchange> {
     const watchdog = new RequestWatchdog(init?.signal, this.watchdog);
     try {

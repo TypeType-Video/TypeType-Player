@@ -50,14 +50,19 @@ test("does not retry permanent client errors", async () => {
   expect(requests).toBe(1);
 });
 
-test("returns permanent segment errors to the caller", async () => {
-  globalThis.fetch = () => Promise.resolve(new Response(null, { status: 404 }));
+test("returns segment statuses to the caller without retrying", async () => {
+  let requests = 0;
+  globalThis.fetch = () => {
+    requests += 1;
+    return Promise.resolve(new Response(null, { status: 503 }));
+  };
 
-  const response = await new HttpClient({ endpoint: "https://example.test/api" }).response(
+  const exchange = await new HttpClient({ endpoint: "https://example.test/api" }).once(
     "https://example.test/segment",
   );
 
-  expect(response.status).toBe(404);
+  expect(exchange.status).toBe(503);
+  expect(requests).toBe(1);
 });
 
 test("bounds transient gateway retries by a total time budget", async () => {
