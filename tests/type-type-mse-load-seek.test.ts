@@ -9,7 +9,7 @@ type LoadSeekHarness = {
   loadInitialSession: () => Promise<void>;
   load: () => Promise<void>;
   seek: (positionMs: number) => Promise<void>;
-  seekController: { seek: (positionMs: number) => Promise<void> };
+  seekController: { busy: boolean; seek: (positionMs: number) => Promise<void> };
   bufferedSeekRecovery: { cancel: () => void };
   liveEdgeFollower: { observeUserSeek: () => void };
   video: { paused: boolean; currentTime: number; buffered: TimeRanges };
@@ -30,6 +30,7 @@ function loadingPlayer() {
       };
     });
   player.seekController = {
+    busy: false,
     seek: async (positionMs) => {
       backendSeeks.push(positionMs);
     },

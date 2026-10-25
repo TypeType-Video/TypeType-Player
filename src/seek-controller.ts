@@ -14,6 +14,10 @@ export class SeekController {
   private running: Promise<void> | null = null;
   private revision = 0;
 
+  get busy(): boolean {
+    return this.running !== null;
+  }
+
   seek(positionMs: number, key: string, execute: SeekExecutor, cancel: () => void): Promise<void> {
     if (
       this.running &&

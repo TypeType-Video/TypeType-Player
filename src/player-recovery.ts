@@ -18,6 +18,10 @@ export class PlaybackRecovery {
   private readonly handledSessionIds = new Set<string>();
   private failureReported = false;
 
+  get active(): boolean {
+    return this.recoveringSessionId !== null;
+  }
+
   begin(sessionId: string): PlaybackRecoveryDecision {
     if (this.recoveringSessionId === sessionId || this.handledSessionIds.has(sessionId)) {
       return "ignore";

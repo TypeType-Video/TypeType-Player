@@ -2,7 +2,9 @@ import { expect, test } from "bun:test";
 import { BufferedSeekRecovery } from "../src/buffered-seek-recovery";
 import { LiveEdgeFollower } from "../src/live-edge-follower";
 import { PlaybackIntent } from "../src/playback-intent";
+import { PlaybackRecovery } from "../src/player-recovery";
 import type { LoadedSession } from "../src/session-loader";
+import { SessionTransitionQueue } from "../src/session-transition-queue";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
 import type { TypeTypeMseState } from "../src/types";
 
@@ -16,7 +18,10 @@ type BufferedSeekHarness = {
   playerState: { value: TypeTypeMseState };
   deps: { loop: { wake: () => void } };
   emitter: { emit: (event: unknown) => void };
-  seekController: { seek: () => Promise<void> };
+  seekController: { busy: boolean; seek: () => Promise<void> };
+  loadTask: Promise<void> | null;
+  sessionTransitions: SessionTransitionQueue;
+  playbackRecovery: PlaybackRecovery;
   seek: (positionMs: number) => Promise<void>;
 };
 
@@ -89,7 +94,10 @@ function harness(
   player.playerState = { value: "playing" };
   player.deps = { loop: { wake } };
   player.emitter = { emit };
-  player.seekController = { seek: backendSeek };
+  player.seekController = { busy: false, seek: backendSeek };
+  player.loadTask = null;
+  player.sessionTransitions = new SessionTransitionQueue();
+  player.playbackRecovery = new PlaybackRecovery();
   return player;
 }
 

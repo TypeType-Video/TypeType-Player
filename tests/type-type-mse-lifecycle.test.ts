@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import type { PlaybackManifest } from "../src/manifest";
 import { PlaybackIntent } from "../src/playback-intent";
+import { PlaybackRecovery } from "../src/player-recovery";
 import { SeekController } from "../src/seek-controller";
 import type { LoadedSession } from "../src/session-loader";
+import { SessionTransitionQueue } from "../src/session-transition-queue";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
 import type { TypeTypeMseState } from "../src/types";
 
@@ -14,6 +16,9 @@ type LifecycleHarness = {
   playbackIntent: PlaybackIntent;
   recoveryPositionMs: number;
   seekController: SeekController;
+  loadTask: Promise<void> | null;
+  sessionTransitions: SessionTransitionQueue;
+  playbackRecovery: PlaybackRecovery;
   video: { currentTime: number; ended: boolean; paused: boolean; play: () => Promise<void> };
   deps: {
     loop: {
@@ -67,6 +72,9 @@ function harness(play: () => Promise<void>, shouldResume: boolean) {
   player.playbackIntent = new PlaybackIntent();
   player.recoveryPositionMs = 30_000;
   player.seekController = new SeekController();
+  player.loadTask = null;
+  player.sessionTransitions = new SessionTransitionQueue();
+  player.playbackRecovery = new PlaybackRecovery();
   if (shouldResume) player.playbackIntent.play();
   player.video = {
     currentTime: 30,

@@ -5,6 +5,7 @@ import type { PlaybackLoopFailureContext } from "../src/playback-loop";
 import { PlayerOperation } from "../src/player-operation";
 import { PlaybackRecovery } from "../src/player-recovery";
 import { type LoadedSession, PlaybackWindowRecoveryError } from "../src/session-loader";
+import { SessionTransitionQueue } from "../src/session-transition-queue";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
 import type { TypeTypeMseConfig, TypeTypeMseState } from "../src/types";
 
@@ -43,7 +44,7 @@ type RecoveryHarness = {
   loadInitialSession: () => Promise<void>;
   load: () => Promise<void>;
   enqueueSessionTransition: <T>(work: () => Promise<T>) => Promise<T>;
-  sessionTransition: Promise<void>;
+  sessionTransitions: SessionTransitionQueue;
 };
 
 function loaded(sessionId: string, videoItag = 137): LoadedSession {
@@ -78,7 +79,7 @@ export function harness(create: RecoveryHarness["deps"]["playback"]["create"], p
   const qualities: number[] = [];
   player.destroyed = false;
   player.loadTask = null;
-  player.sessionTransition = Promise.resolve();
+  player.sessionTransitions = new SessionTransitionQueue();
   player.session = loaded("source");
   player.operation = new PlayerOperation();
   player.playbackRecovery = new PlaybackRecovery();

@@ -23,12 +23,14 @@ import { PlayerState } from "./player-state";
 import { SeekController } from "./seek-controller";
 import { type LoadedSession, PlaybackWindowRecoveryError } from "./session-loader";
 import { shouldApplySessionPosition } from "./session-position";
+import { SessionTransitionQueue } from "./session-transition-queue";
 import { observePageSuspension, TransientMediaState } from "./transient-media-state";
 import type {
   TypeTypeMseConfig,
   TypeTypeMseEventType,
   TypeTypeMseListener,
   TypeTypeMseQuality,
+  TypeTypeMseState,
 } from "./types";
 
 /** Drives TypeType SABR playback through Media Source Extensions on an HTML video element. */ export class TypeTypeMsePlayer {
@@ -51,7 +53,7 @@ import type {
   private loadTask: Promise<void> | null = null;
   private liveEdgeCatchUpTask: Promise<void> | null = null;
   private lifecycleResumeTask: Promise<void> | null = null;
-  private sessionTransition: Promise<void> = Promise.resolve();
+  private readonly sessionTransitions = new SessionTransitionQueue();
   private audioOnly: boolean;
   private recoveryPositionMs: number;
   private playbackLifecycleActive = true;
@@ -76,7 +78,7 @@ import type {
       emitter: this.emitter,
       session: () => this.session,
       signal: () => this.operation.signal,
-      state: (state) => this.playerState.set(state),
+      state: (state) => this.applyMediaState(state),
       error: (error) => {
         if (this.bufferedSeekRecovery.handleDecoderError(error)) return true;
         this.bufferedSeekRecovery.cancel();
@@ -161,13 +163,7 @@ import type {
   /** Starts or resumes playback after loading. */ async play(): Promise<void> {
     ensurePlayerAlive(this.destroyed);
     this.playbackIntent.play();
-    if (
-      !this.session ||
-      this.playerState.value === "loading" ||
-      this.playerState.value === "seeking"
-    ) {
-      return;
-    }
+    if (!this.session || this.isTransitioning()) return;
     const revision = this.playbackAttempt.next();
     const signal = this.playbackAttempt.signal;
     if (this.pendingPrerollTargetMs !== null) {
@@ -187,24 +183,17 @@ import type {
     this.playbackIntent.pause();
     this.playbackAttempt.abort();
     this.video.pause();
-    if (this.playerState.value !== "loading" && this.playerState.value !== "seeking") {
-      this.playerState.set("ready");
-    }
+    if (!this.isTransitioning()) this.playerState.set("ready");
   }
   /** Seeks to a millisecond position without replacing the media element. */
   async seek(positionMs: number): Promise<void> {
     const targetMs = Math.max(0, Math.round(positionMs));
     if (this.loadTask || !this.session) return this.seekAfterLoad(targetMs);
     this.bufferedSeekRecovery.cancel();
-    this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
+    this.playbackIntent.capture(this.video.paused, this.isTransitioning());
     this.liveEdgeFollower.observeUserSeek(targetMs, this.session?.manifest.live);
     this.recoveryPositionMs = targetMs;
-    if (
-      this.session &&
-      this.playerState.value !== "loading" &&
-      this.playerState.value !== "seeking" &&
-      canUseBufferedMediaSeek(this.video, targetMs)
-    ) {
+    if (!this.isTransitioning() && canUseBufferedMediaSeek(this.video, targetMs)) {
       const completion = this.bufferedSeekRecovery.arm(
         this.video,
         targetMs,
@@ -260,7 +249,7 @@ import type {
 
   /** Switches formats at the current position without changing playback intent. */
   async setQuality(quality: TypeTypeMseQuality): Promise<void> {
-    this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
+    this.playbackIntent.capture(this.video.paused, this.isTransitioning());
     const targetMs = currentTimeMs(this.video);
     const key = `quality:${targetMs}:${quality.videoItag}:${quality.audioItag}:${quality.audioTrackId ?? ""}`;
     return this.seekController.seek(
@@ -283,7 +272,7 @@ import type {
     if (this.session?.audioOnly === audioOnly) {
       return;
     }
-    this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
+    this.playbackIntent.capture(this.video.paused, this.isTransitioning());
     const targetMs = currentTimeMs(this.video);
     try {
       await this.seekController.seek(
@@ -602,8 +591,7 @@ import type {
     if (
       this.destroyed ||
       !this.session ||
-      this.playerState.value === "loading" ||
-      this.playerState.value === "seeking" ||
+      this.isTransitioning() ||
       this.playerState.value === "error"
     ) {
       return;
@@ -695,11 +683,11 @@ import type {
       positionMs,
       live: this.session?.manifest.live,
       paused: this.video.paused,
-      busy: this.playerState.value === "loading" || this.playerState.value === "seeking",
+      busy: this.isTransitioning(),
       nowMs: Date.now(),
     });
     if (targetMs === null) return;
-    this.playbackIntent.capture(this.video.paused, this.playerState.value === "seeking");
+    this.playbackIntent.capture(this.video.paused, this.isTransitioning());
     const task = this.seekController
       .seek(
         targetMs,
@@ -718,12 +706,23 @@ import type {
 
   /** Serializes MediaSource ownership transitions. */
   private enqueueSessionTransition<T>(work: () => Promise<T>): Promise<T> {
-    const result = this.sessionTransition.then(work, work);
-    this.sessionTransition = result.then(
-      () => undefined,
-      () => undefined,
+    return this.sessionTransitions.enqueue(work);
+  }
+
+  /** Reports whether loading, seeking, a session switch, or recovery owns the media element. */
+  private isTransitioning(): boolean {
+    return (
+      this.loadTask !== null ||
+      this.seekController.busy ||
+      this.sessionTransitions.active ||
+      this.playbackRecovery.active
     );
-    return result;
+  }
+
+  /** Applies media element state unless a player transition owns the state. */
+  private applyMediaState(state: TypeTypeMseState): void {
+    if ((state === "playing" || state === "buffering") && this.isTransitioning()) return;
+    this.playerState.set(state);
   }
 }
 

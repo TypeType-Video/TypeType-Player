@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { PlaybackIntent } from "../src/playback-intent";
 import { PlayerOperation } from "../src/player-operation";
+import { PlaybackRecovery } from "../src/player-recovery";
 import type { LoadedSession } from "../src/session-loader";
+import { SessionTransitionQueue } from "../src/session-transition-queue";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
 import type { TypeTypeMseState } from "../src/types";
 
@@ -13,9 +15,20 @@ type TransitionHarness = {
   playbackAttempt: PlayerOperation;
   playerState: { value: TypeTypeMseState; set: (state: TypeTypeMseState) => void };
   video: { paused: boolean; pause: () => void; play: () => Promise<void> };
+  loadTask: Promise<void> | null;
+  seekController: { busy: boolean };
+  sessionTransitions: SessionTransitionQueue;
+  playbackRecovery: PlaybackRecovery;
   play: () => Promise<void>;
   pause: () => void;
 };
+
+function idleTransitions(player: TransitionHarness, seeking: boolean): void {
+  player.loadTask = null;
+  player.seekController = { busy: seeking };
+  player.sessionTransitions = new SessionTransitionQueue();
+  player.playbackRecovery = new PlaybackRecovery();
+}
 
 test("queues playback intent while a session seek is in progress", async () => {
   let plays = 0;
@@ -30,6 +43,7 @@ test("queues playback intent while a session seek is in progress", async () => {
     value: "seeking",
     set: (state) => (player.playerState.value = state),
   };
+  idleTransitions(player, true);
   player.video = {
     paused: true,
     pause: () => {
@@ -71,6 +85,7 @@ test("cancels a pending browser play when the player is paused", async () => {
     value: "ready",
     set: (state) => (player.playerState.value = state),
   };
+  idleTransitions(player, false);
   player.video = {
     paused: true,
     pause: () => {
