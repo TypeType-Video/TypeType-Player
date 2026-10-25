@@ -199,6 +199,7 @@ function handleWindow(window: Awaited<ReturnType<PlaybackClient["segments"]>>) {
       window.terminalError,
       window.recoveryAction,
       window.retryVideoItags,
+      window.retryAfterMs,
     );
   }
   throw new PlaybackWindowTerminalError(window.terminalError);

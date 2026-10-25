@@ -16,3 +16,5 @@ export function fakeRetryTiming(startMs = 1_000_000, random = 0): FakeRetryTimin
     },
   };
 }
+
+export async function skipRecoveryDelay(): Promise<void> {}

@@ -139,6 +139,7 @@ test("does not report a failure after a newer operation supersedes recovery", as
   const pending = new Promise<PlaybackResponse>((_resolve, reject) => {
     rejectCreate = reject;
   });
+  pending.catch(() => undefined);
   const { player, failures } = harness(async () => pending, true);
 
   player.handlePlaybackLoopError(recoveryError(), {

@@ -1,4 +1,7 @@
+import { TypeTypeHttpError } from "./http-client";
 import type { CreatePlaybackRequest, PlaybackResponse } from "./playback-client";
+import { PlaybackWindowRecoveryError } from "./playback-window-error";
+import { abortableSleep } from "./retry-timing";
 import type { LoadedSession } from "./session-loader";
 
 export const MAX_FRESH_SESSION_RECOVERIES = 2;
@@ -6,6 +9,8 @@ const STABLE_PLAYBACK_RESET_MS = 30_000;
 const MAX_PROGRESS_GAP_MS = 2_000;
 const MAX_PROGRESS_RATE = 4;
 const PROGRESS_TOLERANCE_MS = 500;
+const RECOVERY_BACKOFF_MS = [1_000, 2_000];
+const MAX_RECOVERY_DELAY_MS = 60_000;
 
 export type PlaybackRecoveryDecision = "recover" | "exhausted" | "ignore";
 
@@ -17,6 +22,13 @@ export class PlaybackRecovery {
   private lastPositionMs: number | null = null;
   private readonly handledSessionIds = new Set<string>();
   private failureReported = false;
+
+  constructor(
+    private readonly sleep: (
+      delayMs: number,
+      signal: AbortSignal,
+    ) => Promise<void> = abortableSleep,
+  ) {}
 
   get active(): boolean {
     return this.recoveringSessionId !== null;
@@ -36,6 +48,13 @@ export class PlaybackRecovery {
     if (this.attempts >= MAX_FRESH_SESSION_RECOVERIES) return false;
     this.attempts += 1;
     return true;
+  }
+
+  waitBeforeAttempt(error: unknown, signal: AbortSignal): Promise<void> {
+    const backoffIndex = Math.min(this.attempts, RECOVERY_BACKOFF_MS.length) - 1;
+    const backoffMs = RECOVERY_BACKOFF_MS[backoffIndex] ?? 0;
+    const delayMs = Math.min(MAX_RECOVERY_DELAY_MS, backoffMs + requestedRetryAfterMs(error));
+    return this.sleep(delayMs, signal);
   }
 
   complete(positionMs: number, nowMs = performance.now()): void {
@@ -119,6 +138,8 @@ export async function recoverPlaybackSession(args: RecoverArgs): Promise<LoadedS
   let lastError: unknown = args.error;
   while (args.recovery.takeAttempt(videoItag)) {
     try {
+      await args.recovery.waitBeforeAttempt(lastError, args.signal);
+      args.ensureCurrent();
       const response = await args.create(
         {
           videoId: args.videoId,
@@ -144,6 +165,13 @@ export async function recoverPlaybackSession(args: RecoverArgs): Promise<LoadedS
     }
   }
   throw lastError;
+}
+
+function requestedRetryAfterMs(error: unknown): number {
+  if (error instanceof PlaybackWindowRecoveryError || error instanceof TypeTypeHttpError) {
+    return Math.max(0, error.retryAfterMs ?? 0);
+  }
+  return 0;
 }
 
 function isAbortError(error: unknown): boolean {

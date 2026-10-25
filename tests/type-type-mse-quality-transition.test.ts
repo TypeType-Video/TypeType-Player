@@ -8,6 +8,7 @@ import { SeekController } from "../src/seek-controller";
 import type { LoadedSession } from "../src/session-loader";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
 import type { TypeTypeMseQuality, TypeTypeMseState } from "../src/types";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 type QualityHarness = {
   destroyed: boolean;
@@ -135,7 +136,7 @@ function harness(
   player.destroyed = false;
   player.session = session();
   player.operation = new PlayerOperation();
-  player.playbackRecovery = new PlaybackRecovery();
+  player.playbackRecovery = new PlaybackRecovery(skipRecoveryDelay);
   player.bufferedSeekRecovery = new BufferedSeekRecovery(() => () => undefined);
   player.playbackIntent = new PlaybackIntent();
   player.seekController = new SeekController();

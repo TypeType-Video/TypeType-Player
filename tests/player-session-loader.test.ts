@@ -4,6 +4,7 @@ import type { PlaybackResponse } from "../src/playback-client";
 import type { PlaybackWindow } from "../src/playback-window";
 import { PlaybackRecovery } from "../src/player-recovery";
 import { loadPlayerSession, loadPlayerSessionOnce } from "../src/player-session-loader";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 Object.defineProperty(globalThis, "MediaSource", {
   value: {
@@ -109,7 +110,7 @@ test("uses the server-resolved live start for the first window and buffer fill",
     quality: undefined,
     startTimeMs: 0,
     signal: new AbortController().signal,
-    recovery: new PlaybackRecovery(),
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
   });
 
   expect(requestedPositions).toEqual([60_000]);
@@ -173,7 +174,7 @@ test("keeps current media active until a replacement window is ready", async () 
     quality: undefined,
     startTimeMs: 0,
     signal: new AbortController().signal,
-    recovery: new PlaybackRecovery(),
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
     beforeAttach: async () => {
       quiesced = true;
     },
@@ -241,7 +242,7 @@ test("recovers invalid sabr context with a fresh session using the same formats"
     quality: undefined,
     startTimeMs: 399_383,
     signal: new AbortController().signal,
-    recovery: new PlaybackRecovery(),
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
   });
 
   expect(created).toEqual([137]);

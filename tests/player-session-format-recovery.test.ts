@@ -4,6 +4,7 @@ import type { PlaybackResponse } from "../src/playback-client";
 import type { PlaybackWindow, PlaybackWindowRequest } from "../src/playback-window";
 import { PlaybackRecovery } from "../src/player-recovery";
 import { loadPlayerSession } from "../src/player-session-loader";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 Object.defineProperty(globalThis, "MediaSource", {
   value: { isTypeSupported: (mime: string) => mime.length > 0 },
@@ -109,7 +110,7 @@ test("recovers a 4x seek window without changing the selected video itag", async
     quality: undefined,
     startTimeMs: 60_000,
     signal: new AbortController().signal,
-    recovery: new PlaybackRecovery(),
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
   });
 
   expect(session.response.sessionId).toBe("fresh-137");

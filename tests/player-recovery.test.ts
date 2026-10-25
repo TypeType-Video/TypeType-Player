@@ -3,6 +3,7 @@ import type { PlaybackManifest } from "../src/manifest";
 import type { CreatePlaybackRequest, PlaybackResponse } from "../src/playback-client";
 import { PlaybackRecovery, recoverPlaybackSession } from "../src/player-recovery";
 import { type LoadedSession, PlaybackWindowRecoveryError } from "../src/session-loader";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 const manifest: PlaybackManifest = {
   durationMs: 600_000,
@@ -40,7 +41,7 @@ function recoveryError(
 }
 
 test("bounds one recovery chain and resets it after stable progress", () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
 
   expect(recovery.begin("source")).toBe("recover");
   expect(recovery.begin("source")).toBe("ignore");
@@ -60,7 +61,7 @@ test("bounds one recovery chain and resets it after stable progress", () => {
 });
 
 test("does not reset recovery across a playback stall", () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   expect(recovery.takeAttempt(137)).toBe(true);
   expect(recovery.takeAttempt(137)).toBe(true);
   recovery.complete(100_000, 0);
@@ -76,7 +77,7 @@ test("does not reset recovery across a playback stall", () => {
 });
 
 test("restarts stable progress after a duplicate media timeupdate", () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   expect(recovery.takeAttempt(137)).toBe(true);
   expect(recovery.takeAttempt(137)).toBe(true);
   recovery.complete(100_000, 0);
@@ -89,7 +90,7 @@ test("restarts stable progress after a duplicate media timeupdate", () => {
 });
 
 test("does not reset the attempt budget during active recovery", () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   expect(recovery.takeAttempt(137)).toBe(true);
   recovery.complete(100_000, 0);
   for (let second = 1; second <= 29; second += 1) {
@@ -104,7 +105,7 @@ test("does not reset the attempt budget during active recovery", () => {
 });
 
 test("reports only one final failure per recovery chain", () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   const failures: string[] = [];
 
   recovery.reportOnce(new Error("first"), (error) => failures.push(error.message));
@@ -116,7 +117,7 @@ test("reports only one final failure per recovery chain", () => {
 });
 
 test("uses two fresh sessions with the exact playback selection and position", async () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   const requests: CreatePlaybackRequest[] = [];
   const switched: number[] = [];
 
@@ -162,7 +163,7 @@ test("uses two fresh sessions with the exact playback selection and position", a
 });
 
 test("keeps the exact video format when a legacy backend requests a lower itag", async () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   const requests: CreatePlaybackRequest[] = [];
 
   const session = await recoverPlaybackSession({
@@ -190,7 +191,7 @@ test("keeps the exact video format when a legacy backend requests a lower itag",
 });
 
 test("stops recovery immediately when its operation is aborted", async () => {
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   let creates = 0;
 
   await expect(

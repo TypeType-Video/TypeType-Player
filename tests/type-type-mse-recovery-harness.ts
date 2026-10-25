@@ -8,6 +8,7 @@ import { type LoadedSession, PlaybackWindowRecoveryError } from "../src/session-
 import { SessionTransitionQueue } from "../src/session-transition-queue";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
 import type { TypeTypeMseConfig, TypeTypeMseState } from "../src/types";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 const manifest: PlaybackManifest = {
   durationMs: 600_000,
@@ -82,7 +83,7 @@ export function harness(create: RecoveryHarness["deps"]["playback"]["create"], p
   player.sessionTransitions = new SessionTransitionQueue();
   player.session = loaded("source");
   player.operation = new PlayerOperation();
-  player.playbackRecovery = new PlaybackRecovery();
+  player.playbackRecovery = new PlaybackRecovery(skipRecoveryDelay);
   player.playbackIntent = new PlaybackIntent();
   player.playerState = {
     value: "playing",

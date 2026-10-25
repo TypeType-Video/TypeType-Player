@@ -128,6 +128,7 @@ async function recoverInitialSession(
   while (true) {
     if (!args.recovery.takeAttempt(videoItag)) throw lastError;
     try {
+      await args.recovery.waitBeforeAttempt(lastError, args.signal);
       const response = await args.deps.playback.create(
         {
           videoId: args.config.videoId,

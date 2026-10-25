@@ -4,6 +4,7 @@ import type { PlaybackResponse } from "../src/playback-client";
 import type { PlaybackWindow, PlaybackWindowRequest } from "../src/playback-window";
 import { PlaybackRecovery } from "../src/player-recovery";
 import { loadPlayerSession } from "../src/player-session-loader";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 Object.defineProperty(globalThis, "MediaSource", {
   value: { isTypeSupported: (mime: string) => mime.length > 0 },
@@ -54,7 +55,7 @@ test("initial loading uses two fresh sessions before succeeding", async () => {
   const creates: Array<{ videoItag: number; audioTrackId: string | null; startTimeMs: number }> =
     [];
   const prefetchSessions: string[] = [];
-  const recovery = new PlaybackRecovery();
+  const recovery = new PlaybackRecovery(skipRecoveryDelay);
   const session = await loadPlayerSession({
     deps: {
       playback: {

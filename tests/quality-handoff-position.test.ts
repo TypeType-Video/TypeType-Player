@@ -4,6 +4,7 @@ import type { PlaybackResponse } from "../src/playback-client";
 import type { PlaybackWindow, PlaybackWindowRequest } from "../src/playback-window";
 import { PlaybackRecovery } from "../src/player-recovery";
 import { loadPlayerSessionOnce } from "../src/player-session-loader";
+import { skipRecoveryDelay } from "./fake-retry-timing";
 
 Object.defineProperty(globalThis, "MediaSource", {
   value: { isTypeSupported: () => true },
@@ -76,7 +77,7 @@ test("uses the exact playing handoff position for a quality replacement", async 
     startTimeMs: 20_000,
     playerTimeMs: () => Math.round(currentTime * 1000),
     signal: new AbortController().signal,
-    recovery: new PlaybackRecovery(),
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
     beforeAttach: async () => {
       currentTime = 22.375;
     },
