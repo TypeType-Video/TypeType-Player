@@ -13,6 +13,8 @@ const SNAP_TOLERANCE_MS = 20;
 const PAUSED_SNAP_THRESHOLD_MS = 1;
 const DEFAULT_PREROLL_RATE = 16;
 const WEBKIT_PREROLL_RATE = 1;
+const PREROLL_POLL_MS = 10;
+const APPROACH_POLLS = 4;
 
 export function decodeStartMs(manifest: PlaybackManifest, targetMs: number): number {
   if (!manifest.video) return targetMs;
@@ -161,7 +163,15 @@ async function waitForTarget(
       playStarted = true;
     }
     if (video.currentTime * 1000 >= targetMs - TARGET_TOLERANCE_MS) return;
+    slowDownNearTarget(video, targetMs);
     if (performance.now() - startedAt >= timeoutMs) throw new Error("Decode preroll timed out");
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await new Promise((resolve) => setTimeout(resolve, PREROLL_POLL_MS));
   }
+}
+
+function slowDownNearTarget(video: HTMLVideoElement, targetMs: number): void {
+  if (video.playbackRate <= 1) return;
+  const remainingMs = targetMs - video.currentTime * 1000;
+  const rate = Math.max(1, remainingMs / (PREROLL_POLL_MS * APPROACH_POLLS));
+  if (rate < video.playbackRate) video.playbackRate = rate;
 }
