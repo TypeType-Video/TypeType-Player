@@ -168,6 +168,11 @@ import type {
     ensurePlayerAlive(this.destroyed);
     this.playbackIntent.play();
     if (!this.session || this.isTransitioning()) return;
+    if (this.video.ended && !this.config.isLive) {
+      await this.seek(0);
+      if (this.video.ended) return;
+      return this.play();
+    }
     const revision = this.playbackAttempt.next();
     const signal = this.playbackAttempt.signal;
     if (this.pendingPrerollTargetMs !== null) {
