@@ -21,12 +21,17 @@ describe("HLS transport", () => {
       liveSyncDuration: 5,
       maxBufferLength: 24,
       maxMaxBufferLength: 50,
-      progressive: true,
+      progressive: false,
       startFragPrefetch: true,
       startLevel: 0,
       testBandwidth: false,
     });
     expect(config).not.toHaveProperty("liveBackBufferLength");
+  });
+
+  test("loads whole segments so AES-128 encrypted HLS can be decrypted", () => {
+    const config = createHlsConfig<{ progressive: boolean }, object>({ FetchLoader: class {} });
+    expect(config.progressive).toBe(false);
   });
 
   test("versions every opaque media request within a playback generation", () => {

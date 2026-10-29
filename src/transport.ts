@@ -95,7 +95,8 @@ export function createHlsConfig<TConfig extends TransportConfig, TLoader extends
     maxBufferLength: bufferSeconds(policy.steadyBufferMs),
     maxLiveSyncPlaybackRate: policy.liveCatchupMaxRate,
     maxMaxBufferLength: bufferSeconds(policy.maxBufferMs),
-    progressive: true,
+    // hls.js cannot decrypt AES-128 segments while it parses them progressively (NicoNico serves encrypted fMP4).
+    progressive: false,
     startFragPrefetch: true,
     startLevel: 0,
     testBandwidth: false,
