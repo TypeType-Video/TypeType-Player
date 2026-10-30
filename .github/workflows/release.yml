@@ -91,7 +91,7 @@ jobs:
         run: npm publish "${{ steps.pack.outputs.filename }}" --access public --provenance=false
 
   publish-jsr:
-    if: (github.event_name == 'push' && startsWith(github.ref_name, 'v')) || inputs.registry == 'jsr' || inputs.registry == 'both'
+    if: github.event_name == 'push' || inputs.registry == 'jsr' || inputs.registry == 'both'
     runs-on: [self-hosted, Linux, X64, ci-stack]
     timeout-minutes: 15
     environment: jsr
@@ -121,4 +121,15 @@ jobs:
         run: |
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
           test "v$(node --print "require('./jsr.json').version")" = "${RELEASE_TAG#npm-}"
-      - run: bun run publish:jsr
+      - name: Check JSR version
+        id: jsr-version
+        run: |
+          version=$(node --print "require('./jsr.json').version")
+          status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://jsr.io/@typetype/mse/${version}_meta.json")
+          case "$status" in
+            200) echo "exists=true" >> "$GITHUB_OUTPUT" ;;
+            404) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
+            *) echo "Unexpected JSR status $status" >&2; exit 1 ;;
+          esac
+      - if: steps.jsr-version.outputs.exists != 'true'
+        run: bun run publish:jsr
