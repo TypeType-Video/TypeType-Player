@@ -57,6 +57,44 @@ test("keeps a source replacement hidden through decode preroll", () => {
   expect(video.playbackRate).toBe(1.25);
 });
 
+test("hands a held decode start to the preroll that reaches the target", () => {
+  const video = videoElement();
+  const state = new TransientMediaState(video);
+
+  state.holdForPreroll();
+  expect(video.muted).toBe(true);
+  expect(video.style.opacity).toBe("0");
+  expect(video.playbackRate).toBe(1.25);
+
+  const finishPreroll = state.beginPreroll();
+  expect(video.playbackRate).toBe(16);
+  finishPreroll();
+  expect(state.active).toBe(false);
+  expect(video.muted).toBe(false);
+  expect(video.style.opacity).toBe("0.75");
+  expect(video.playbackRate).toBe(1.25);
+
+  state.releasePrerollHold();
+  expect(state.active).toBe(false);
+});
+
+test("releases a decode start hold without touching another owner", () => {
+  const video = videoElement();
+  const state = new TransientMediaState(video);
+
+  state.holdForPreroll();
+  state.releasePrerollHold();
+  expect(state.active).toBe(false);
+  expect(video.style.opacity).toBe("0.75");
+
+  const restoreAttachment = state.beginAttachment();
+  state.holdForPreroll();
+  state.releasePrerollHold();
+  expect(state.active).toBe(true);
+  restoreAttachment();
+  expect(state.active).toBe(false);
+});
+
 test("an obsolete owner cannot restore a newer override", () => {
   const video = videoElement();
   const state = new TransientMediaState(video);

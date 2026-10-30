@@ -14,6 +14,7 @@ type LifecycleTargets = {
 export class TransientMediaState {
   private snapshot: MediaStateSnapshot | null = null;
   private revision = 0;
+  private heldForPreroll = false;
 
   constructor(private readonly video: HTMLVideoElement) {}
 
@@ -50,14 +51,34 @@ export class TransientMediaState {
     return restore;
   }
 
+  holdForPreroll(): void {
+    if (this.active) return;
+    this.preserve();
+    this.video.muted = true;
+    if (this.video.style) this.video.style.opacity = "0";
+    this.heldForPreroll = true;
+  }
+
+  releasePrerollHold(): void {
+    if (this.heldForPreroll) this.restore();
+  }
+
   beginPreroll(playbackRate = 16): () => void {
-    if (!this.active) {
-      const restore = this.preserve();
+    if (!this.active || this.heldForPreroll) {
+      const restore = this.heldForPreroll ? this.adoptPrerollHold() : this.preserve();
       this.applyPrerollOverride(playbackRate);
       return restore;
     }
     this.applyPrerollOverride(playbackRate);
     return () => undefined;
+  }
+
+  private adoptPrerollHold(): () => void {
+    this.heldForPreroll = false;
+    const revision = this.revision;
+    return () => {
+      if (revision === this.revision) this.restore();
+    };
   }
 
   private applyPrerollOverride(playbackRate = 16): void {
@@ -76,8 +97,17 @@ export class TransientMediaState {
     if (snapshot.opacity !== null && this.video.style) this.video.style.opacity = snapshot.opacity;
     this.video.autoplay = snapshot.autoplay;
     this.snapshot = null;
+    this.heldForPreroll = false;
     this.revision += 1;
   }
+}
+
+export function suspendAutoplay(video: HTMLVideoElement): () => void {
+  const autoplay = video.autoplay;
+  video.autoplay = false;
+  return () => {
+    video.autoplay = autoplay;
+  };
 }
 
 export function observePageSuspension(

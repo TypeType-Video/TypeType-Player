@@ -25,7 +25,11 @@ import { SeekController } from "./seek-controller";
 import { type LoadedSession, PlaybackWindowRecoveryError } from "./session-loader";
 import { shouldApplySessionPosition } from "./session-position";
 import { SessionTransitionQueue } from "./session-transition-queue";
-import { observePageSuspension, TransientMediaState } from "./transient-media-state";
+import {
+  observePageSuspension,
+  suspendAutoplay,
+  TransientMediaState,
+} from "./transient-media-state";
 import type {
   TypeTypeMseConfig,
   TypeTypeMseEventType,
@@ -435,6 +439,8 @@ import type {
       this.operation.ensureCurrent(this.destroyed, revision);
     };
     if (!quality) await quiesce();
+    // A WebKit seek reattaches the MediaSource, which re-arms the autoplay the page keeps set while playing.
+    const restoreAutoplay = this.session ? suspendAutoplay(this.video) : null;
     try {
       const load = allowWindowRecovery ? loadPlayerSession : loadPlayerSessionOnce;
       const session = await load({
@@ -456,6 +462,9 @@ import type {
       this.recoveryPositionMs = resolvedStartTimeMs;
       const startMs = decodeStartMs(session.manifest, resolvedStartTimeMs);
       if (shouldApplySessionPosition(resolvedStartTimeMs, finalizePausedSeek)) {
+        const decodesToTarget =
+          resolvedStartTimeMs > startMs && (finalizePausedSeek || this.playbackIntent.shouldResume);
+        if (decodesToTarget) this.transientMediaState.holdForPreroll();
         this.video.currentTime = startMs / 1000;
       }
       this.session = session;
@@ -484,6 +493,7 @@ import type {
       } else {
         this.pendingPrerollTargetMs = null;
       }
+      this.transientMediaState.releasePrerollHold();
       await this.playbackIntent.apply(this.video, signal);
       this.operation.ensureCurrent(this.destroyed, revision);
       this.playbackRecovery.complete(currentTimeMs(this.video));
@@ -497,6 +507,8 @@ import type {
       return session;
     } finally {
       if (attachmentStateActive) this.transientMediaState.restore();
+      this.transientMediaState.releasePrerollHold();
+      restoreAutoplay?.();
     }
   }
 
