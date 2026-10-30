@@ -120,12 +120,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
         run: |
           git show-ref --verify --quiet "refs/tags/$RELEASE_TAG"
-          test "v$(node --print "require('./jsr.json').version")" = "${RELEASE_TAG#npm-}"
+          test "v$(bun --print "require('./jsr.json').version")" = "${RELEASE_TAG#npm-}"
       - name: Check JSR version
         id: jsr-version
         run: |
-          version=$(node --print "require('./jsr.json').version")
-          status=$(curl --silent --output /dev/null --write-out '%{http_code}' "https://jsr.io/@typetype/mse/${version}_meta.json")
+          status=$(bun --eval 'const { version } = require("./jsr.json"); const response = await fetch(`https://jsr.io/@typetype/mse/${version}_meta.json`); console.log(response.status);')
           case "$status" in
             200) echo "exists=true" >> "$GITHUB_OUTPUT" ;;
             404) echo "exists=false" >> "$GITHUB_OUTPUT" ;;
