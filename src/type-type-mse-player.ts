@@ -4,9 +4,18 @@ import { EventEmitter } from "./event-emitter";
 import { TypeTypeHttpError } from "./http-client";
 import { LiveEdgeFollower } from "./live-edge-follower";
 import { skipBufferedLiveGap } from "./live-media-gap";
+import type { PlaybackManifest } from "./manifest";
 import { alignPlayheadToBufferedRange, canUseBufferedMediaSeek } from "./media-buffer";
 import { MediaElementPlaybackError } from "./media-element-observer";
 import { playMedia, tryResumePlayback } from "./media-playback";
+import {
+  chooseHandoffMs,
+  firstSegmentStartMs,
+  MODE_SWITCH_BUFFER_MS,
+  planModeHandoff,
+  sessionTrackKinds,
+  waitForPlayhead,
+} from "./mode-switch-handoff";
 import { PlaybackIntent } from "./playback-intent";
 import {
   browserPlaybackLifecycleTargets,
@@ -291,7 +300,7 @@ import type {
       await this.seekController.seek(
         targetMs,
         `mode:${targetMs}:${audioOnly}`,
-        (target) => this.performSeek(target, undefined, audioOnly),
+        (target) => this.performModeSwitch(target, audioOnly),
         () => this.operation.abort(),
       );
     } catch (error) {
@@ -325,6 +334,79 @@ import type {
     this.deps.destroy();
     this.emitter.clear();
     this.playerState.destroy();
+  }
+
+  /** Switches between audio only and video while the current media keeps playing until the swap. */
+  private async performModeSwitch(positionMs: number, audioOnly: boolean): Promise<void> {
+    ensurePlayerAlive(this.destroyed);
+    const current = this.session;
+    const nowMs = currentTimeMs(this.video);
+    const plan =
+      current && !this.video.paused && !this.config.isLive
+        ? planModeHandoff(this.deps.media.bufferedRanges(), nowMs, sessionTrackKinds(current))
+        : null;
+    if (!current || !plan) return this.performSeek(positionMs, undefined, audioOnly);
+    this.bufferedSeekRecovery.cancel();
+    this.resetPlaybackRecovery();
+    const revision = this.operation.next();
+    const signal = this.operation.signal;
+    this.recoveryPositionMs = plan.targetMs;
+    this.deps.loop.stop();
+    await this.deps.loop.quiesce();
+    this.operation.ensureCurrent(this.destroyed, revision);
+    const handoff = async (manifest: PlaybackManifest): Promise<number> => {
+      const handoffMs = chooseHandoffMs(manifest, plan, currentTimeMs(this.video));
+      const windowStartMs = firstSegmentStartMs(manifest) ?? plan.targetMs;
+      this.deps.scheduler.prime(
+        manifest,
+        decodeStartMs(manifest, handoffMs),
+        handoffMs + MODE_SWITCH_BUFFER_MS,
+        signal,
+      );
+      const startMs = Math.max(windowStartMs, await waitForPlayhead(this.video, handoffMs, signal));
+      this.operation.ensureCurrent(this.destroyed, revision);
+      if (isWebKitMediaElement(this.video)) this.deps.media.requireFreshAttachment();
+      this.playerState.set("seeking");
+      this.emitter.emit({ type: "seek", positionMs: startMs });
+      this.video.pause();
+      this.recoveryPositionMs = startMs;
+      return startMs;
+    };
+    try {
+      const response = await this.deps.playback.seek(
+        current.response.sessionId,
+        plan.targetMs,
+        { audioOnly },
+        signal,
+      );
+      await this.switchSession(
+        response,
+        plan.targetMs,
+        revision,
+        signal,
+        undefined,
+        audioOnly,
+        false,
+        true,
+        handoff,
+      );
+    } catch (error) {
+      if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
+        if (isRecoverableSeekError(error)) {
+          this.handlePlaybackLoopError(
+            error,
+            { sessionId: current.response.sessionId, signal },
+            currentTimeMs(this.video),
+          );
+          return;
+        }
+        this.deps.loop.start();
+        this.playerState.set(this.video.paused ? "ready" : "playing");
+      }
+      throw error;
+    } finally {
+      this.deps.scheduler.discardPrimed();
+    }
   }
 
   /** Executes the latest coalesced seek or quality operation. */
@@ -401,6 +483,7 @@ import type {
     audioOnly = this.audioOnly,
     finalizePausedSeek = false,
     allowWindowRecovery = true,
+    handoff?: (manifest: PlaybackManifest) => Promise<number>,
   ): Promise<LoadedSession> {
     return this.enqueueSessionTransition(() =>
       this.activateSession(
@@ -412,6 +495,7 @@ import type {
         audioOnly,
         finalizePausedSeek,
         allowWindowRecovery,
+        handoff,
       ),
     );
   }
@@ -426,6 +510,7 @@ import type {
     audioOnly = this.audioOnly,
     finalizePausedSeek = false,
     allowWindowRecovery = true,
+    handoff?: (manifest: PlaybackManifest) => Promise<number>,
   ): Promise<LoadedSession> {
     let attachmentStateActive = false;
     const quiesce = async () => {
@@ -454,6 +539,7 @@ import type {
         signal,
         recovery: this.playbackRecovery,
         ...(quality ? { beforeAttach: quiesce } : {}),
+        ...(handoff ? { handoff, startupBufferMs: MODE_SWITCH_BUFFER_MS } : {}),
         ...(this.bufferKeepingRevision === revision ? { keepBufferedMedia: true } : {}),
       });
       this.operation.ensureCurrent(this.destroyed, revision);
@@ -484,7 +570,7 @@ import type {
       } else if (this.playbackIntent.shouldResume) {
         this.pendingPrerollTargetMs = null;
         if (resolvedStartTimeMs > 0) {
-          await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
+          await this.runDecodePreroll(resolvedStartTimeMs, Boolean(handoff), signal, true);
         }
         await tryResumePlayback(this.video);
       } else if (finalizePausedSeek && resolvedStartTimeMs > 0) {
