@@ -39,6 +39,7 @@ type LoadSessionArgs = {
   policy: BufferPolicy;
   signal: AbortSignal;
   beforeAttach?: () => Promise<void>;
+  handoff?: (manifest: PlaybackManifest) => Promise<number>;
   keepBufferedMedia?: boolean;
 };
 
@@ -77,8 +78,9 @@ async function attachSession(
   if (!MediaSourceController.supported(manifest)) throw new Error("MSE codecs are not supported");
   ensureNotAborted(args.signal);
   await args.beforeAttach?.();
+  const handoffMs = args.handoff ? await args.handoff(manifest) : undefined;
   ensureNotAborted(args.signal);
-  const handoffStartTimeMs = args.playerTimeMs?.();
+  const handoffStartTimeMs = handoffMs ?? args.playerTimeMs?.();
   const attachedResponse =
     handoffStartTimeMs === undefined ? response : { ...response, startTimeMs: handoffStartTimeMs };
   const attachedManifest =

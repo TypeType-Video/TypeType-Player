@@ -262,3 +262,66 @@ function window(sessionId: string, generation: number | null, ready: boolean): P
     manifest: null,
   };
 }
+
+test("attaches a mode switch at the handoff position it picked", async () => {
+  const events: string[] = [];
+  const fills: number[] = [];
+  const session = await loadPlayerSessionOnce({
+    deps: {
+      playback: {
+        create: async () => response("unused"),
+        position: async (sessionId, request) => window(sessionId, request.generation, true),
+        prefetch: async (sessionId, request) => window(sessionId, request.generation, true),
+        segments: async (sessionId, request) => ({
+          ...window(sessionId, request.generation, true),
+          manifest,
+        }),
+      },
+      media: {
+        attach: async () => {
+          events.push("attach");
+        },
+        bufferedRanges: () => [],
+      },
+      scheduler: {
+        appendInit: async () => undefined,
+        fill: async (_manifest, startMs) => {
+          fills.push(startMs);
+          return "filled";
+        },
+        reset: () => undefined,
+      },
+      policy: {
+        bufferGoalMs: 30_000,
+        backBufferMs: 30_000,
+        pollIntervalMs: 500,
+        manifestRefreshMs: 8_000,
+        manifestPollLimit: 2,
+        segmentPollLimit: 2,
+      },
+    },
+    config: {
+      endpoint: "https://beta.typetype.video/api",
+      videoId: "V_YKnVyUJgQ",
+      videoItag: 137,
+      audioItag: 140,
+      audioTrackId: null,
+      audioOnly: true,
+    },
+    video: { currentTime: 60, paused: false },
+    response: response("replacement"),
+    current: null,
+    quality: undefined,
+    startTimeMs: 60_600,
+    signal: new AbortController().signal,
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
+    handoff: async (handoffManifest) => {
+      events.push(`handoff ${handoffManifest.video?.initUrl}`);
+      return 59_000;
+    },
+  });
+
+  expect(events).toEqual(["handoff /video/init", "attach"]);
+  expect(session.response.startTimeMs).toBe(59_000);
+  expect(fills).toEqual([59_000]);
+});

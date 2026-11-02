@@ -1,4 +1,5 @@
 import { decodeStartMs } from "./decode-preroll";
+import type { PlaybackManifest } from "./manifest";
 import { rateAwareBufferGoalMs } from "./playback-rate";
 import type { PlayerDeps } from "./player-deps";
 import type { PlaybackRecovery } from "./player-recovery";
@@ -22,6 +23,8 @@ type Args = {
   signal: AbortSignal;
   recovery: PlaybackRecovery;
   beforeAttach?: () => Promise<void>;
+  handoff?: (manifest: PlaybackManifest) => Promise<number>;
+  startupBufferMs?: number;
   keepBufferedMedia?: boolean;
 };
 
@@ -91,7 +94,7 @@ async function loadSelectedSession(
     audioOnly: args.config.audioOnly === true,
     startTimeMs: requestedStartTimeMs,
     playbackRate: args.deps.playbackRate,
-    bufferGoalMs: Math.min(STARTUP_BUFFER_MS, args.deps.policy.bufferGoalMs),
+    bufferGoalMs: Math.min(startupBufferMs(args), args.deps.policy.bufferGoalMs),
     policy: args.deps.policy,
     signal: args.signal,
     ...(args.quality && args.video.paused === false
@@ -100,6 +103,7 @@ async function loadSelectedSession(
         }
       : {}),
     ...(args.beforeAttach ? { beforeAttach: args.beforeAttach } : {}),
+    ...(args.handoff ? { handoff: args.handoff } : {}),
     ...(args.keepBufferedMedia ? { keepBufferedMedia: true } : {}),
   });
   const startTimeMs =
@@ -111,13 +115,17 @@ async function loadSelectedSession(
     fillStartMs,
     startTimeMs +
       Math.min(
-        rateAwareBufferGoalMs(STARTUP_BUFFER_MS, playbackRate),
+        rateAwareBufferGoalMs(startupBufferMs(args), playbackRate),
         rateAwareBufferGoalMs(args.deps.policy.bufferGoalMs, playbackRate),
       ),
     args.signal,
   );
   if (args.signal.aborted) throw new DOMException("Operation aborted", "AbortError");
   return session;
+}
+
+function startupBufferMs(args: Args): number {
+  return args.startupBufferMs ?? STARTUP_BUFFER_MS;
 }
 
 async function recoverInitialSession(
