@@ -180,3 +180,31 @@ test("keeps an appended segment whose buffered range ends slightly early", async
 
   expect(requested).toEqual(["/segment"]);
 });
+
+test("appends primed media without downloading it again", async () => {
+  const requested: string[] = [];
+  const http = {
+    once: async (url: string) => {
+      requested.push(url);
+      return segmentExchange();
+    },
+  } as unknown as HttpClient;
+  const media = {
+    append: async () => "appended",
+    bufferedRanges: () => [],
+  } as unknown as MediaSourceController;
+  const scheduler = new SegmentScheduler(http, media, { emit: () => undefined } as EventEmitter, 1);
+  const primedManifest = manifest([
+    { url: "/1", startMs: 0, durationMs: 5_000 },
+    { url: "/2", startMs: 5_000, durationMs: 5_000 },
+    { url: "/3", startMs: 10_000, durationMs: 5_000 },
+  ]);
+
+  scheduler.prime(primedManifest, 4_000, 6_000);
+  expect(requested.sort()).toEqual(["/1", "/2", "/audio/init"]);
+  scheduler.reset();
+  await scheduler.appendInit(primedManifest);
+  await scheduler.fill(primedManifest, 4_000, 11_000);
+
+  expect(requested.sort()).toEqual(["/1", "/2", "/3", "/audio/init"]);
+});

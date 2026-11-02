@@ -12,6 +12,7 @@ export type SegmentFillResult = "filled" | "deferred";
 
 export class SegmentScheduler {
   private readonly appended = new Set<string>();
+  private readonly primed = new Map<string, Promise<ArrayBuffer>>();
   private revision = 0;
 
   constructor(
@@ -24,6 +25,36 @@ export class SegmentScheduler {
   reset(): void {
     this.revision += 1;
     this.appended.clear();
+  }
+
+  /** Starts downloading the first media of a session that is not attached yet. */
+  prime(manifest: PlaybackManifest, fromMs: number, goalMs: number, signal?: AbortSignal): void {
+    this.primed.clear();
+    const urls = [
+      manifest.audio.initUrl,
+      ...primedSegmentUrls(manifest.audio.segments, fromMs, goalMs),
+    ];
+    if (manifest.video) {
+      urls.push(
+        manifest.video.initUrl,
+        ...primedSegmentUrls(manifest.video.segments, fromMs, goalMs),
+      );
+    }
+    for (const url of urls) {
+      const bytes = fetchSegmentBytes(
+        this.http,
+        url,
+        this.pollLimit,
+        signal,
+        this.http.retryTiming,
+      );
+      bytes.catch(() => undefined);
+      this.primed.set(url, bytes);
+    }
+  }
+
+  discardPrimed(): void {
+    this.primed.clear();
   }
 
   async appendInit(manifest: PlaybackManifest, signal?: AbortSignal): Promise<void> {
@@ -101,13 +132,7 @@ export class SegmentScheduler {
       }
       this.appended.delete(key);
     }
-    const bytes = await fetchSegmentBytes(
-      this.http,
-      url,
-      this.pollLimit,
-      signal,
-      this.http.retryTiming,
-    );
+    const bytes = await this.segmentBytes(url, signal);
     this.ensureActive(revision, signal);
     const result = await this.media.append(kind, bytes);
     this.ensureActive(revision, signal);
@@ -115,6 +140,18 @@ export class SegmentScheduler {
     this.appended.add(key);
     this.emitter.emit({ type: "segment", kind, url, startMs, durationMs });
     return true;
+  }
+
+  private async segmentBytes(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+    const primed = this.primed.get(url);
+    this.primed.delete(url);
+    const download = () =>
+      fetchSegmentBytes(this.http, url, this.pollLimit, signal, this.http.retryTiming);
+    if (!primed) return download();
+    return primed.catch((error: unknown) => {
+      if (signal?.aborted) throw error;
+      return download();
+    });
   }
 
   private isBuffered(
@@ -134,6 +171,12 @@ export class SegmentScheduler {
       throw new DOMException("Operation aborted", "AbortError");
     }
   }
+}
+
+function primedSegmentUrls(segments: ManifestSegment[], fromMs: number, goalMs: number): string[] {
+  return segments
+    .filter((segment) => segment.startMs + segment.durationMs > fromMs && segment.startMs <= goalMs)
+    .map((segment) => segment.url);
 }
 
 function coversSegment(
