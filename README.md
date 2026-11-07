@@ -73,7 +73,7 @@ Always call `destroy()` when the player is no longer used.
 
 Requirements:
 
-- Bun 1.3.14
+- Bun 1.4.4
 - Deno 2.9.2 for JSR and documentation validation
 
 ```sh

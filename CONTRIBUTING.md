@@ -12,7 +12,7 @@ Controls and watch-page behavior belong in [TypeType-Frontend](https://github.co
 
 ## Set up the project
 
-Use Bun 1.3.14 and Deno 2.9.2.
+Use Bun 1.4.4 and Deno 2.9.2.
 
 ```sh
 git switch dev
