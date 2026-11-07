@@ -4,7 +4,7 @@
   "description": "MSE playback engine for TypeType",
   "license": "MIT",
   "type": "module",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/TypeType-Video/TypeType-Player.git"
