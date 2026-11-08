@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { isPlaybackPermissionError, playMedia, tryResumePlayback } from "../src/media-playback";
+import {
+  isPlaybackPermissionError,
+  playMedia,
+  tryResumePlayback,
+  waitForNativeSeek,
+} from "../src/media-playback";
 
 test("resumes playback when the browser accepts the request", async () => {
   let plays = 0;
@@ -65,4 +70,28 @@ test("keeps an aborted pending play paused after Safari resolves it late", async
   await pending;
   await Promise.resolve();
   expect(pauses).toBe(2);
+});
+
+test("waitForNativeSeek returns immediately when media is not seeking", async () => {
+  const video = { seeking: false };
+  await waitForNativeSeek(video);
+});
+
+test("waitForNativeSeek waits for seeked event", async () => {
+  let listener: (() => void) | undefined;
+  const video = {
+    seeking: true,
+    addEventListener: (type: string, cb: () => void) => {
+      if (type === "seeked") listener = cb;
+    },
+    removeEventListener: () => undefined,
+  };
+  let resolved = false;
+  const promise = waitForNativeSeek(video).then(() => {
+    resolved = true;
+  });
+  expect(resolved).toBe(false);
+  listener?.();
+  await promise;
+  expect(resolved).toBe(true);
 });

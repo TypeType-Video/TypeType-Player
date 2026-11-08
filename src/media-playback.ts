@@ -38,3 +38,30 @@ function abortError(): DOMException {
 export function isPlaybackPermissionError(error: unknown): boolean {
   return error instanceof Error && error.name === "NotAllowedError";
 }
+
+export async function waitForNativeSeek(
+  video: Pick<HTMLVideoElement, "seeking"> & {
+    addEventListener?: (type: string, listener: () => void, options?: { once?: boolean }) => void;
+    removeEventListener?: (type: string, listener: () => void) => void;
+  },
+  signal?: AbortSignal,
+): Promise<void> {
+  if (!video.seeking || typeof video.addEventListener !== "function") return;
+  if (signal?.aborted) return;
+  await new Promise<void>((resolve) => {
+    const onSeeked = () => {
+      cleanup();
+      resolve();
+    };
+    const onAbort = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      video.removeEventListener?.("seeked", onSeeked);
+      signal?.removeEventListener("abort", onAbort);
+    };
+    video.addEventListener?.("seeked", onSeeked, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
