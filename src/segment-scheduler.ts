@@ -26,6 +26,7 @@ export class SegmentScheduler {
   reset(): void {
     this.revision += 1;
     this.appended.clear();
+    this.recheckAttempts.clear();
   }
 
   /** Starts downloading the first media of a session that is not attached yet. */
@@ -102,7 +103,10 @@ export class SegmentScheduler {
       .sort((left, right) => left.startMs - right.startMs);
     for (const segment of candidates) {
       const segmentEndMs = segment.startMs + segment.durationMs;
-      if (this.isBuffered(kind, segment.startMs, segmentEndMs)) continue;
+      if (this.isBuffered(kind, segment.startMs, segmentEndMs)) {
+        this.recheckAttempts.delete(`${kind}:${segment.url}`);
+        continue;
+      }
       const appended = await this.appendUrl(
         kind,
         segment.url,
@@ -129,6 +133,7 @@ export class SegmentScheduler {
     if (this.appended.has(key)) {
       if (durationMs <= 0) return true;
       if (this.isBuffered(kind, startMs, startMs + durationMs, APPENDED_RANGE_TOLERANCE_MS)) {
+        this.recheckAttempts.delete(key);
         return true;
       }
       const retries = (this.recheckAttempts.get(key) ?? 0) + 1;

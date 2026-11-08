@@ -95,3 +95,26 @@ test("waitForNativeSeek waits for seeked event", async () => {
   await promise;
   expect(resolved).toBe(true);
 });
+
+test("waitForNativeSeek does not wait for a seek outside buffered media", async () => {
+  const buffered = { length: 1, start: () => 0, end: () => 10 } as unknown as TimeRanges;
+  const video = {
+    seeking: true,
+    currentTime: 22,
+    buffered,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  };
+  await waitForNativeSeek(video);
+  expect(video.seeking).toBe(true);
+});
+
+test("waitForNativeSeek stops waiting after its timeout", async () => {
+  const video = {
+    seeking: true,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+  };
+  await waitForNativeSeek(video, undefined, 10);
+  expect(video.seeking).toBe(true);
+});
