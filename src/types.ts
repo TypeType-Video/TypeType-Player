@@ -13,6 +13,9 @@ export type TypeTypeMseState =
   | "error"
   | "destroyed";
 
+/** MSE seek strategy used to align playback to seek positions. */
+export type PlayerSeekMode = "preroll" | "native";
+
 /** Configuration used to connect an HTML video element to a TypeType SABR session. */
 export type TypeTypeMseConfig = {
   endpoint: string;
@@ -30,6 +33,7 @@ export type TypeTypeMseConfig = {
   manifestRefreshMs?: number;
   manifestPollLimit?: number;
   segmentPollLimit?: number;
+  seekMode?: PlayerSeekMode;
 };
 
 /** Audio and video format selection applied during a seamless quality switch. */

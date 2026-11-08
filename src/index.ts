@@ -33,6 +33,7 @@ export {
 } from "./transport";
 export { TypeTypeMsePlayer } from "./type-type-mse-player";
 export type {
+  PlayerSeekMode,
   TrackKind,
   TypeTypeMseConfig,
   TypeTypeMseEvent,
