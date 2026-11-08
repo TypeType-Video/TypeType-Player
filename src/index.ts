@@ -15,8 +15,6 @@ export type {
   PlaybackWindowRequest,
 } from "./playback-window";
 export type { TypeTypeMseSnapshot } from "./player-snapshot";
-export type { SeekStrategy } from "./seek-strategy";
-export { createSeekStrategy, NativeSeekStrategy, PrerollSeekStrategy } from "./seek-strategy";
 export type {
   DashStreamingSettings,
   HlsTransportOptions,

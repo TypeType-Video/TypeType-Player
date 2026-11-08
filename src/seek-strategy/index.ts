@@ -7,6 +7,7 @@ export { NativeSeekStrategy } from "./native-seek-strategy";
 export { PrerollSeekStrategy } from "./preroll-seek-strategy";
 export * from "./types";
 
+/** Factory function creating a SeekStrategy instance corresponding to the requested PlayerSeekMode. */
 export function createSeekStrategy(mode?: PlayerSeekMode): SeekStrategy {
   if (mode === "native") {
     return new NativeSeekStrategy();
