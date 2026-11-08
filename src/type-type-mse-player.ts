@@ -74,7 +74,7 @@ import type {
   private recoveryPositionMs: number;
   private playbackLifecycleActive = true;
   private destroyed = false;
-  private seekStrategy: SeekStrategy;
+  private readonly seekStrategy: SeekStrategy;
 
   /** Creates a player without starting network or media operations. */ constructor(
     private readonly video: HTMLVideoElement,
@@ -565,12 +565,8 @@ import type {
       const resolvedStartTimeMs =
         session.response.startTimeMs ?? session.manifest.startTimeMs ?? startTimeMs;
       this.recoveryPositionMs = resolvedStartTimeMs;
-      if (!this.seekStrategy) {
-        this.seekStrategy = createSeekStrategy(this.config?.seekMode);
-      }
-      const seekStrategy = this.seekStrategy;
       if (shouldApplySessionPosition(resolvedStartTimeMs, finalizePausedSeek)) {
-        seekStrategy.alignSessionPosition({
+        this.seekStrategy.alignSessionPosition({
           video: this.video,
           resolvedStartTimeMs,
           manifest: session.manifest,
@@ -581,7 +577,7 @@ import type {
       }
       this.session = session;
       alignPlayheadToBufferedRange(this.video);
-      this.pendingPrerollTargetMs = await seekStrategy.executeSessionSeek({
+      this.pendingPrerollTargetMs = await this.seekStrategy.executeSessionSeek({
         video: this.video,
         resolvedStartTimeMs,
         manifest: session.manifest,

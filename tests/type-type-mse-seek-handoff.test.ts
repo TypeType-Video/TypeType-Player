@@ -6,6 +6,7 @@ import { PlaybackIntent } from "../src/playback-intent";
 import type { PlaybackWindow, PlaybackWindowRequest } from "../src/playback-window";
 import { PlayerOperation } from "../src/player-operation";
 import { PlaybackRecovery } from "../src/player-recovery";
+import { createSeekStrategy } from "../src/seek-strategy";
 import type { LoadedSession } from "../src/session-loader";
 import { TransientMediaState } from "../src/transient-media-state";
 import { TypeTypeMsePlayer } from "../src/type-type-mse-player";
@@ -144,6 +145,7 @@ function harness(playing: boolean) {
     playbackRecovery: new PlaybackRecovery(skipRecoveryDelay),
     playbackIntent: intent,
     transientMediaState: new TransientMediaState(video as unknown as HTMLVideoElement),
+    seekStrategy: createSeekStrategy(),
     liveEdgeFollower: new LiveEdgeFollower(false),
     bufferKeepingRevision: null,
     playbackLifecycleActive: false,
