@@ -31,6 +31,7 @@ import { loadPlayerSession, loadPlayerSessionOnce } from "./player-session-loade
 import { createSnapshot, currentTimeMs, type TypeTypeMseSnapshot } from "./player-snapshot";
 import { PlayerState } from "./player-state";
 import { SeekController } from "./seek-controller";
+import { createSeekStrategy, type SeekStrategy } from "./seek-strategy";
 import { type LoadedSession, PlaybackWindowRecoveryError } from "./session-loader";
 import { shouldApplySessionPosition } from "./session-position";
 import { SessionTransitionQueue } from "./session-transition-queue";
@@ -73,6 +74,7 @@ import type {
   private recoveryPositionMs: number;
   private playbackLifecycleActive = true;
   private destroyed = false;
+  private seekStrategy: SeekStrategy;
 
   /** Creates a player without starting network or media operations. */ constructor(
     private readonly video: HTMLVideoElement,
@@ -82,6 +84,7 @@ import type {
     this.video.playsInline = true;
     this.audioOnly = config.audioOnly === true;
     this.recoveryPositionMs = Math.max(0, Math.round(config.startTimeMs ?? 0));
+    this.seekStrategy = createSeekStrategy(config.seekMode);
     this.liveEdgeFollower = new LiveEdgeFollower(config.isLive === true);
     this.transientMediaState = new TransientMediaState(video);
     this.stopPageSuspensionObserver = observePageSuspension(() =>
@@ -562,39 +565,33 @@ import type {
       const resolvedStartTimeMs =
         session.response.startTimeMs ?? session.manifest.startTimeMs ?? startTimeMs;
       this.recoveryPositionMs = resolvedStartTimeMs;
-      const startMs = decodeStartMs(session.manifest, resolvedStartTimeMs);
+      if (!this.seekStrategy) {
+        this.seekStrategy = createSeekStrategy(this.config?.seekMode);
+      }
+      const seekStrategy = this.seekStrategy;
       if (shouldApplySessionPosition(resolvedStartTimeMs, finalizePausedSeek)) {
-        const decodesToTarget =
-          resolvedStartTimeMs > startMs && (finalizePausedSeek || this.playbackIntent.shouldResume);
-        if (decodesToTarget) this.transientMediaState.holdForPreroll();
-        this.video.currentTime = startMs / 1000;
+        seekStrategy.alignSessionPosition({
+          video: this.video,
+          resolvedStartTimeMs,
+          manifest: session.manifest,
+          finalizePausedSeek,
+          shouldResume: this.playbackIntent.shouldResume,
+          transientMediaState: this.transientMediaState,
+        });
       }
       this.session = session;
       alignPlayheadToBufferedRange(this.video);
-      if (resolvedStartTimeMs > startMs) {
-        if (this.playbackIntent.shouldResume) {
-          await this.runDecodePreroll(resolvedStartTimeMs, true, signal);
-          this.pendingPrerollTargetMs = null;
-        } else {
-          if (finalizePausedSeek) {
-            await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
-            this.pendingPrerollTargetMs = null;
-          } else {
-            this.pendingPrerollTargetMs = resolvedStartTimeMs;
-          }
-        }
-      } else if (this.playbackIntent.shouldResume) {
-        this.pendingPrerollTargetMs = null;
-        if (resolvedStartTimeMs > 0) {
-          await this.runDecodePreroll(resolvedStartTimeMs, Boolean(handoff), signal, true);
-        }
-        await tryResumePlayback(this.video);
-      } else if (finalizePausedSeek && resolvedStartTimeMs > 0) {
-        await this.runDecodePreroll(resolvedStartTimeMs, false, signal, true);
-        this.pendingPrerollTargetMs = null;
-      } else {
-        this.pendingPrerollTargetMs = null;
-      }
+      this.pendingPrerollTargetMs = await seekStrategy.executeSessionSeek({
+        video: this.video,
+        resolvedStartTimeMs,
+        manifest: session.manifest,
+        signal,
+        finalizePausedSeek,
+        shouldResume: this.playbackIntent.shouldResume,
+        handoff: Boolean(handoff),
+        transientMediaState: this.transientMediaState,
+        fillBuffer: () => this.deps.loop.fillOnce(),
+      });
       this.transientMediaState.releasePrerollHold();
       await waitForNativeSeek(this.video, signal);
       await this.playbackIntent.apply(this.video, signal);
