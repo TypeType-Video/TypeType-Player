@@ -208,3 +208,57 @@ test("appends primed media without downloading it again", async () => {
 
   expect(requested.sort()).toEqual(["/1", "/2", "/3", "/audio/init"]);
 });
+
+test("limits recheck retries to prevent re-fetch storms on timestamp jitter", async () => {
+  const requested: string[] = [];
+  const http = {
+    once: async (url: string) => {
+      requested.push(url);
+      return segmentExchange();
+    },
+  } as unknown as HttpClient;
+  const buffered: MediaBufferedRange[] = [{ kind: "audio", startMs: 0, endMs: 9_500 }];
+  const media = {
+    append: async () => "appended",
+    bufferedRanges: () => buffered,
+  } as unknown as MediaSourceController;
+  const scheduler = new SegmentScheduler(http, media, { emit: () => undefined } as EventEmitter, 1);
+  const testManifest = manifest([{ url: "/jitter-segment", startMs: 0, durationMs: 10_000 }]);
+
+  await scheduler.fill(testManifest, 0, 10_000);
+  expect(requested).toEqual(["/jitter-segment"]);
+
+  await scheduler.fill(testManifest, 0, 10_000);
+  expect(requested).toEqual(["/jitter-segment", "/jitter-segment"]);
+
+  await scheduler.fill(testManifest, 0, 10_000);
+  expect(requested).toEqual(["/jitter-segment", "/jitter-segment"]);
+});
+
+test("appends a segment again each time the browser evicts it", async () => {
+  const requested: string[] = [];
+  let buffered: MediaBufferedRange[] = [];
+  const http = {
+    once: async (url: string) => {
+      requested.push(url);
+      return segmentExchange();
+    },
+  } as unknown as HttpClient;
+  const media = {
+    append: async () => {
+      buffered = [{ kind: "audio", startMs: 0, endMs: 10_000 }];
+      return "appended";
+    },
+    bufferedRanges: () => buffered,
+  } as unknown as MediaSourceController;
+  const scheduler = new SegmentScheduler(http, media, { emit: () => undefined } as EventEmitter, 1);
+  const testManifest = manifest([{ url: "/evicted", startMs: 0, durationMs: 10_000 }]);
+
+  for (let eviction = 0; eviction < 3; eviction += 1) {
+    await scheduler.fill(testManifest, 0, 10_000);
+    await scheduler.fill(testManifest, 0, 10_000);
+    buffered = [];
+  }
+
+  expect(requested).toEqual(["/evicted", "/evicted", "/evicted"]);
+});

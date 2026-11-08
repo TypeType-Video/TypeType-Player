@@ -7,7 +7,7 @@ import { skipBufferedLiveGap } from "./live-media-gap";
 import type { PlaybackManifest } from "./manifest";
 import { alignPlayheadToBufferedRange, canUseBufferedMediaSeek } from "./media-buffer";
 import { MediaElementPlaybackError } from "./media-element-observer";
-import { playMedia, tryResumePlayback } from "./media-playback";
+import { playMedia, tryResumePlayback, waitForNativeSeek } from "./media-playback";
 import {
   chooseHandoffMs,
   firstSegmentStartMs,
@@ -122,6 +122,7 @@ import type {
         this.deps.loop.wake();
       });
     }
+    this.video.addEventListener?.("pause", this.onNativePause);
     this.stopPlaybackLifecycleObserver = observePlaybackLifecycle(
       {
         active: (active) => this.syncPlaybackLifecycle(active),
@@ -319,10 +320,25 @@ import type {
     return this.transientMediaState.active;
   }
 
+  private onNativePause = (): void => {
+    if (
+      !this.destroyed &&
+      !this.isTransitioning() &&
+      !this.transientMediaState.active &&
+      !(this.video as { seeking?: boolean }).seeking
+    ) {
+      this.playbackIntent.pause();
+      if (this.playerState.value === "playing" || this.playerState.value === "buffering") {
+        this.playerState.set("ready");
+      }
+    }
+  };
+
   /** Aborts pending work and releases all media and event resources. */
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.video.removeEventListener?.("pause", this.onNativePause);
     this.operation.abort();
     this.playbackAttempt.abort();
     this.transientMediaState.restore();
@@ -580,6 +596,7 @@ import type {
         this.pendingPrerollTargetMs = null;
       }
       this.transientMediaState.releasePrerollHold();
+      await waitForNativeSeek(this.video, signal);
       await this.playbackIntent.apply(this.video, signal);
       this.operation.ensureCurrent(this.destroyed, revision);
       this.playbackRecovery.complete(currentTimeMs(this.video));

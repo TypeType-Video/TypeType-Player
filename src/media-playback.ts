@@ -1,3 +1,5 @@
+import { bufferedRangeAt } from "./media-buffer";
+
 type PlayableMedia = Pick<HTMLVideoElement, "pause" | "play">;
 
 export async function playMedia(video: PlayableMedia, signal?: AbortSignal): Promise<void> {
@@ -37,4 +39,41 @@ function abortError(): DOMException {
 
 export function isPlaybackPermissionError(error: unknown): boolean {
   return error instanceof Error && error.name === "NotAllowedError";
+}
+
+const NATIVE_SEEK_TIMEOUT_MS = 2_000;
+
+type SeekingMedia = Pick<HTMLVideoElement, "seeking"> & {
+  currentTime?: number;
+  buffered?: TimeRanges;
+  addEventListener?: (type: string, listener: () => void, options?: { once?: boolean }) => void;
+  removeEventListener?: (type: string, listener: () => void) => void;
+};
+
+// A seek completes only once its position has media, which the loop appends after this wait:
+// waiting on an unbuffered position would never end.
+export async function waitForNativeSeek(
+  video: SeekingMedia,
+  signal?: AbortSignal,
+  timeoutMs = NATIVE_SEEK_TIMEOUT_MS,
+): Promise<void> {
+  if (!video.seeking || typeof video.addEventListener !== "function" || signal?.aborted) return;
+  if (
+    video.buffered &&
+    typeof video.currentTime === "number" &&
+    !bufferedRangeAt(video.buffered, video.currentTime)
+  ) {
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    const finish = () => {
+      clearTimeout(timer);
+      video.removeEventListener?.("seeked", finish);
+      signal?.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    video.addEventListener?.("seeked", finish, { once: true });
+    signal?.addEventListener("abort", finish, { once: true });
+  });
 }
