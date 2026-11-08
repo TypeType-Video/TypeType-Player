@@ -24,7 +24,22 @@ permissions:
   contents: read
 
 jobs:
+  on-main:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ inputs.release_tag || github.ref }}
+      - name: Publish only commits that are on main
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+        run: git merge-base --is-ancestor "refs/tags/$RELEASE_TAG^{commit}" origin/main
+
   publish-npm:
+    needs: on-main
     if: github.event_name == 'push' || inputs.registry == 'npm' || inputs.registry == 'both'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -91,6 +106,7 @@ jobs:
         run: npm publish "${{ steps.pack.outputs.filename }}" --access public --provenance=false
 
   publish-jsr:
+    needs: on-main
     if: github.event_name == 'push' || inputs.registry == 'jsr' || inputs.registry == 'both'
     runs-on: ubuntu-latest
     timeout-minutes: 15
