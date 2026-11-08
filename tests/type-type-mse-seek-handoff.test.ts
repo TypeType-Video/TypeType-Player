@@ -145,7 +145,7 @@ function harness(playing: boolean) {
     playbackRecovery: new PlaybackRecovery(skipRecoveryDelay),
     playbackIntent: intent,
     transientMediaState: new TransientMediaState(video as unknown as HTMLVideoElement),
-    seekStrategy: createSeekStrategy(),
+    seekStrategy: createSeekStrategy("preroll"),
     liveEdgeFollower: new LiveEdgeFollower(false),
     bufferKeepingRevision: null,
     playbackLifecycleActive: false,

@@ -26,16 +26,16 @@ const manifest: PlaybackManifest = {
   },
 };
 
-test("factory creates PrerollSeekStrategy by default", () => {
+test("factory creates NativeSeekStrategy by default", () => {
   const strategy = createSeekStrategy();
-  expect(strategy).toBeInstanceOf(PrerollSeekStrategy);
-  expect(strategy.mode).toBe("preroll");
-});
-
-test("factory creates NativeSeekStrategy when mode is native", () => {
-  const strategy = createSeekStrategy("native");
   expect(strategy).toBeInstanceOf(NativeSeekStrategy);
   expect(strategy.mode).toBe("native");
+});
+
+test("factory creates PrerollSeekStrategy when mode is preroll", () => {
+  const strategy = createSeekStrategy("preroll");
+  expect(strategy).toBeInstanceOf(PrerollSeekStrategy);
+  expect(strategy.mode).toBe("preroll");
 });
 
 test("NativeSeekStrategy positions currentTime directly without muting or opacity mask", () => {
