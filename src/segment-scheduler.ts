@@ -6,13 +6,14 @@ import { fetchSegmentBytes } from "./segment-fetcher";
 import type { TrackKind } from "./types";
 
 const BUFFERED_RANGE_TOLERANCE_MS = 50;
-const APPENDED_RANGE_TOLERANCE_MS = 250;
+const APPENDED_RANGE_TOLERANCE_MS = 450;
 
 export type SegmentFillResult = "filled" | "deferred";
 
 export class SegmentScheduler {
   private readonly appended = new Set<string>();
   private readonly primed = new Map<string, Promise<ArrayBuffer>>();
+  private readonly recheckAttempts = new Map<string, number>();
   private revision = 0;
 
   constructor(
@@ -128,6 +129,11 @@ export class SegmentScheduler {
     if (this.appended.has(key)) {
       if (durationMs <= 0) return true;
       if (this.isBuffered(kind, startMs, startMs + durationMs, APPENDED_RANGE_TOLERANCE_MS)) {
+        return true;
+      }
+      const retries = (this.recheckAttempts.get(key) ?? 0) + 1;
+      this.recheckAttempts.set(key, retries);
+      if (retries > 1) {
         return true;
       }
       this.appended.delete(key);
