@@ -27,6 +27,10 @@ export type TypeTypeMseConfig = {
   isLive?: boolean;
   startTimeMs?: number;
   headers?: HeadersInit;
+  /** Dynamic header provider evaluated before each HTTP request. */
+  getHeaders?: () => HeadersInit | undefined;
+  /** Optional 401 handler invoked once per request before retrying with updated headers. */
+  onUnauthorized?: (status: number, requestHeaders: Headers) => Promise<boolean | undefined>;
   bufferGoalMs?: number;
   backBufferMs?: number;
   pollIntervalMs?: number;

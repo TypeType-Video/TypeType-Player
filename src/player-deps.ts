@@ -40,11 +40,12 @@ type Args = {
 };
 
 export function createPlayerDeps(args: Args): PlayerDeps {
-  const http = new HttpClient(
-    args.config.headers
-      ? { endpoint: args.config.endpoint, headers: args.config.headers }
-      : { endpoint: args.config.endpoint },
-  );
+  const http = new HttpClient({
+    endpoint: args.config.endpoint,
+    ...(args.config.headers ? { headers: args.config.headers } : {}),
+    ...(args.config.getHeaders ? { getHeaders: args.config.getHeaders } : {}),
+    ...(args.config.onUnauthorized ? { onUnauthorized: args.config.onUnauthorized } : {}),
+  });
   const playback = new PlaybackClient(http);
   const policy = resolveBufferPolicy(args.config);
   const stablePlaybackRate = new StablePlaybackRate(args.video);
