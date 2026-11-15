@@ -29,7 +29,8 @@ type Args = {
 };
 
 type PlayerSessionDeps = {
-  playback: Pick<PlayerDeps["playback"], "create" | "position" | "prefetch" | "segments">;
+  playback: Pick<PlayerDeps["playback"], "create" | "position" | "prefetch" | "segments"> &
+    Partial<Pick<PlayerDeps["playback"], "window">>;
   media: Pick<PlayerDeps["media"], "attach" | "bufferedRanges">;
   scheduler: Pick<PlayerDeps["scheduler"], "appendInit" | "fill" | "reset">;
   policy: PlayerDeps["policy"];
@@ -94,7 +95,7 @@ async function loadSelectedSession(
     audioOnly: args.config.audioOnly === true,
     startTimeMs: requestedStartTimeMs,
     playbackRate: args.deps.playbackRate,
-    bufferGoalMs: Math.min(startupBufferMs(args), args.deps.policy.bufferGoalMs),
+    bufferGoalMs: args.deps.policy.bufferGoalMs,
     policy: args.deps.policy,
     signal: args.signal,
     ...(args.quality && args.video.paused === false

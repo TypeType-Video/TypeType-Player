@@ -114,7 +114,7 @@ test("uses the server-resolved live start for the first window and buffer fill",
   });
 
   expect(requestedPositions).toEqual([60_000]);
-  expect(requestedBufferGoals).toEqual([2_500]);
+  expect(requestedBufferGoals).toEqual([30_000]);
   expect(requestedSelections).toEqual([[248, 251, "fr-FR.4"]]);
   expect(filledWindows).toEqual([[59_000, 62_500]]);
   expect(session.response.startTimeMs).toBe(60_000);
@@ -324,4 +324,72 @@ test("attaches a mode switch at the handoff position it picked", async () => {
   expect(events).toEqual(["handoff /video/init", "attach"]);
   expect(session.response.startTimeMs).toBe(59_000);
   expect(fills).toEqual([59_000]);
+});
+
+test("requests full 10s policy manifest window via single /window call while unblocking VOD fill at 2.5s", async () => {
+  const requestedGoals: number[] = [];
+  const filledWindows: Array<[number, number]> = [];
+  let granularCalls = 0;
+  const session = await loadPlayerSessionOnce({
+    deps: {
+      playback: {
+        create: async () => response("unused"),
+        window: async (sessionId, request) => {
+          requestedGoals.push(request.bufferGoalMs);
+          return {
+            ...window(sessionId, request.generation, true),
+            manifest: { ...manifest, startTimeMs: 0 },
+          };
+        },
+        position: async (sessionId, request) => {
+          granularCalls += 1;
+          return window(sessionId, request.generation, true);
+        },
+        prefetch: async (sessionId, request) => {
+          granularCalls += 1;
+          return window(sessionId, request.generation, true);
+        },
+        segments: async (sessionId, request) => {
+          granularCalls += 1;
+          return window(sessionId, request.generation, true);
+        },
+      },
+      media: { attach: async () => undefined, bufferedRanges: () => [] },
+      scheduler: {
+        appendInit: async () => undefined,
+        fill: async (_manifest, startMs, endMs) => {
+          filledWindows.push([startMs, endMs]);
+          return "filled";
+        },
+        reset: () => undefined,
+      },
+      policy: {
+        bufferGoalMs: 10_000,
+        backBufferMs: 30_000,
+        pollIntervalMs: 500,
+        manifestRefreshMs: 8_000,
+        manifestPollLimit: 2,
+        segmentPollLimit: 2,
+      },
+    },
+    config: {
+      endpoint: "https://beta.typetype.video/api",
+      videoId: "R1-j8TFlqCo",
+      videoItag: 137,
+      audioItag: 140,
+      audioTrackId: null,
+    },
+    video: { currentTime: 0 },
+    response: response("vod-session"),
+    current: null,
+    quality: undefined,
+    startTimeMs: 0,
+    signal: new AbortController().signal,
+    recovery: new PlaybackRecovery(skipRecoveryDelay),
+  });
+
+  expect(granularCalls).toBe(0);
+  expect(requestedGoals).toEqual([10_000]);
+  expect(filledWindows).toEqual([[0, 2_500]]);
+  expect(session.response.sessionId).toBe("vod-session");
 });
