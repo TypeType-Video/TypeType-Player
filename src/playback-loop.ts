@@ -1,3 +1,4 @@
+import { AdaptiveRefreshThreshold } from "./adaptive-refresh-threshold";
 import { PlaybackLoopTaskController } from "./playback-loop-task-controller";
 import type { PlaybackLoopArgs, PlaybackLoopFailureContext } from "./playback-loop-types";
 import { rateAwareBufferGoalMs, refreshThresholdMs } from "./playback-rate";
@@ -16,6 +17,7 @@ export class PlaybackLoop {
   private fillTaskRevision: number | null = null;
   private refreshTask: Promise<void> | null = null;
   private taskController = new PlaybackLoopTaskController();
+  private readonly adaptiveThreshold = new AdaptiveRefreshThreshold();
   private revision = 0;
   private active = false;
   private quotaGoalLimitMs: number | null = null;
@@ -87,16 +89,14 @@ export class PlaybackLoop {
     const currentMs = currentTimeMs(this.args.video);
     const trim = this.args.media.trim(currentMs, this.args.policy.backBufferMs);
     trim.catch(() => undefined);
-    const bufferGoalMs = this.quotaLimitedGoalMs(
-      rateAwareBufferGoalMs(this.args.policy.bufferGoalMs, this.args.playbackRate?.() ?? 1),
-    );
+    const bufferGoalMs = this.effectiveBufferGoalMs();
     const goalMs = currentMs + bufferGoalMs + this.liveStallRecoveryMs(bufferGoalMs);
     let result = await this.fillCurrentGeneration(session, currentMs, goalMs, signal, revision);
     this.ensureCurrent(revision, signal);
     if (
       result !== "deferred" &&
       !session.manifest.endOfStream &&
-      this.args.bufferedEndMs() < currentMs + refreshThresholdMs(bufferGoalMs)
+      this.args.bufferedEndMs() < currentMs + this.refreshTriggerThresholdMs(bufferGoalMs)
     ) {
       this.requestManifestRefresh(revision);
       const refresh = this.refreshTask;
@@ -151,6 +151,17 @@ export class PlaybackLoop {
     }
   }
 
+  private effectiveBufferGoalMs(): number {
+    return this.quotaLimitedGoalMs(
+      rateAwareBufferGoalMs(this.args.policy.bufferGoalMs, this.args.playbackRate?.() ?? 1),
+    );
+  }
+
+  private refreshTriggerThresholdMs(bufferGoalMs: number): number {
+    const isLive = this.args.session()?.manifest.live?.active === true;
+    return this.adaptiveThreshold.thresholdMs(bufferGoalMs, isLive);
+  }
+
   private quotaLimitedGoalMs(goalMs: number): number {
     return Math.min(goalMs, this.quotaGoalLimitMs ?? goalMs);
   }
@@ -174,6 +185,8 @@ export class PlaybackLoop {
       () => currentTimeMs(this.args.video),
       signal,
       this.args.playbackRate,
+      undefined,
+      (rttMs) => this.adaptiveThreshold.observeControlRtt(rttMs),
     );
     this.ensureCurrent(revision, signal);
   }
@@ -202,9 +215,7 @@ export class PlaybackLoop {
   private requestManifestRefreshIfNeeded(revision: number): void {
     if (revision !== this.revision) return;
     const currentMs = currentTimeMs(this.args.video);
-    const thresholdMs = refreshThresholdMs(
-      rateAwareBufferGoalMs(this.args.policy.bufferGoalMs, this.args.playbackRate?.() ?? 1),
-    );
+    const thresholdMs = this.refreshTriggerThresholdMs(this.effectiveBufferGoalMs());
     const session = this.args.session();
     const waitingForLiveData = this.waitingForLiveData(session);
     if (waitingForLiveData || this.args.bufferedEndMs() < currentMs + thresholdMs) {

@@ -403,3 +403,116 @@ test("does not attach a stale fill rejection to a restarted loop", async () => {
   expect(failures).toHaveLength(0);
   expect(fillCalls).toBeGreaterThan(1);
 });
+
+test("uses shrunk quotaGoalLimitMs for manifest refresh threshold checks", async () => {
+  let refreshes = 0;
+  const session: LoadedSession = {
+    response: {
+      sessionId: "session",
+      videoId: "video",
+      generation: 0,
+      ready: true,
+      retryAfterMs: null,
+    },
+    manifest,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+  };
+  const loop = new PlaybackLoop({
+    video: { currentTime: 0, paused: false, readyState: 4 },
+    playback: {
+      window: async (_sessionId, request) => {
+        refreshes += 1;
+        return window(request);
+      },
+      position: async (_sessionId, request) => window(request),
+      prefetch: async (_sessionId, request) => window(request),
+      segments: async (_sessionId, request) => window(request),
+    },
+    media: { bufferedRanges: () => [], endOfStream: () => false, trim: async () => undefined },
+    scheduler: { fill: async () => "deferred" },
+    emitter: { emit: () => undefined },
+    policy: {
+      bufferGoalMs: 10_000,
+      backBufferMs: 30_000,
+      pollIntervalMs: 500,
+      manifestRefreshMs: 25,
+      manifestPollLimit: 2,
+      segmentPollLimit: 2,
+    },
+    session: () => session,
+    signal: () => new AbortController().signal,
+    bufferedEndMs: () => 5_000,
+    error: (error) => {
+      throw error;
+    },
+  });
+
+  await loop.fillOnce();
+  loop.start();
+  await Bun.sleep(40);
+  loop.stop();
+  expect(refreshes).toBe(0);
+});
+
+test("triggers manifest refresh earlier within the 10s goal after observing high control RTT", async () => {
+  let bufferedEndMs = 6_000;
+  let refreshes = 0;
+  const requestedGoals: number[] = [];
+  const session: LoadedSession = {
+    response: {
+      sessionId: "session",
+      videoId: "video",
+      generation: 0,
+      ready: true,
+      retryAfterMs: null,
+    },
+    manifest,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+  };
+  const loop = new PlaybackLoop({
+    video: { currentTime: 0, paused: false, readyState: 4 },
+    playback: {
+      window: async (_sessionId, request) => {
+        refreshes += 1;
+        requestedGoals.push(request.bufferGoalMs);
+        await Bun.sleep(420);
+        return window(request);
+      },
+      position: async (_sessionId, request) => window(request),
+      prefetch: async (_sessionId, request) => window(request),
+      segments: async (_sessionId, request) => window(request),
+    },
+    media: { bufferedRanges: () => [], endOfStream: () => false, trim: async () => undefined },
+    scheduler: { fill: async () => "filled" },
+    emitter: { emit: () => undefined },
+    policy: {
+      bufferGoalMs: 10_000,
+      backBufferMs: 30_000,
+      pollIntervalMs: 500,
+      manifestRefreshMs: 8_000,
+      manifestPollLimit: 2,
+      segmentPollLimit: 2,
+    },
+    session: () => session,
+    signal: () => new AbortController().signal,
+    bufferedEndMs: () => bufferedEndMs,
+    error: (error) => {
+      throw error;
+    },
+  });
+
+  await loop.fillOnce();
+  expect(refreshes).toBe(1);
+  expect(requestedGoals).toEqual([10_000]);
+
+  bufferedEndMs = 7_000;
+  await loop.fillOnce();
+  expect(refreshes).toBe(2);
+  expect(requestedGoals).toEqual([10_000, 10_000]);
+});
