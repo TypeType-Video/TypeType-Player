@@ -24,12 +24,8 @@ function manifest(segments: PlaybackManifest["audio"]["segments"]): PlaybackMani
 test("never appends a late segment behind the buffered track edge", async () => {
   const appended: string[] = [];
   const buffered: MediaBufferedRange[] = [];
-  let requestedUrl = "";
   const http = {
-    once: async (url: string) => {
-      requestedUrl = url;
-      return segmentExchange();
-    },
+    once: async (url: string) => encodedExchange(url),
   } as unknown as HttpClient;
   const segment40 = { url: "/40", startMs: 389_398, durationMs: 9_985 };
   const segment41 = { url: "/41", startMs: 399_383, durationMs: 9_985 };
@@ -39,9 +35,10 @@ test("never appends a late segment behind the buffered track edge", async () => 
     [segment40, segment41, segment42, segment43].map((segment) => [segment.url, segment]),
   );
   const media = {
-    append: async (kind: "audio" | "video") => {
-      appended.push(requestedUrl);
-      const segment = segmentsByUrl.get(requestedUrl);
+    append: async (kind: "audio" | "video", bytes: ArrayBuffer) => {
+      const url = new TextDecoder().decode(bytes);
+      appended.push(url);
+      const segment = segmentsByUrl.get(url);
       if (segment) {
         buffered.push({
           kind,
@@ -145,6 +142,15 @@ test("re-fetches a segment after its SourceBuffer range was evicted", async () =
 
   expect(requested).toEqual(["/segment", "/segment"]);
 });
+
+function encodedExchange(url: string): HttpExchange {
+  return {
+    status: 200,
+    statusText: "OK",
+    headers: new Headers(),
+    body: new TextEncoder().encode(url).buffer,
+  };
+}
 
 function segmentExchange(): HttpExchange {
   return {
@@ -261,4 +267,121 @@ test("appends a segment again each time the browser evicts it", async () => {
   }
 
   expect(requested).toEqual(["/evicted", "/evicted", "/evicted"]);
+});
+
+test("pipelines one lookahead segment fetch per track while appending in FIFO order", async () => {
+  const requested: string[] = [];
+  const appended: string[] = [];
+  const buffered: MediaBufferedRange[] = [];
+  let releaseSecondAppend: (() => void) | null = null;
+  const secondAppendGate = new Promise<void>((resolve) => {
+    releaseSecondAppend = resolve;
+  });
+  const segments = [
+    { url: "/1", startMs: 0, durationMs: 5_000 },
+    { url: "/2", startMs: 5_000, durationMs: 5_000 },
+    { url: "/3", startMs: 10_000, durationMs: 5_000 },
+    { url: "/4", startMs: 15_000, durationMs: 5_000 },
+  ];
+  const byUrl = new Map(segments.map((segment) => [segment.url, segment]));
+  const http = {
+    once: async (url: string) => {
+      requested.push(url);
+      return encodedExchange(url);
+    },
+  } as unknown as HttpClient;
+  const media = {
+    append: async (kind: "audio" | "video", bytes: ArrayBuffer) => {
+      const url = new TextDecoder().decode(bytes);
+      if (url === "/2") await secondAppendGate;
+      appended.push(url);
+      const seg = byUrl.get(url);
+      if (seg) buffered.push({ kind, startMs: seg.startMs, endMs: seg.startMs + seg.durationMs });
+      return "appended" as const;
+    },
+    bufferedRanges: () => buffered,
+  } as unknown as MediaSourceController;
+  const scheduler = new SegmentScheduler(http, media, { emit: () => undefined } as EventEmitter, 1);
+
+  await scheduler.fill(manifest(segments), 0, 2_500);
+  expect(requested).toEqual(["/1"]);
+
+  const fillNext = scheduler.fill(manifest(segments), 0, 16_000);
+  await Bun.sleep(0);
+
+  expect(requested).toEqual(["/1", "/2", "/3"]);
+  expect(appended).toEqual(["/1"]);
+
+  if (!releaseSecondAppend) throw new Error("Expected second append gate");
+  releaseSecondAppend();
+  await fillNext;
+
+  expect(requested).toEqual(["/1", "/2", "/3", "/4"]);
+  expect(appended).toEqual(["/1", "/2", "/3", "/4"]);
+});
+
+test("aborts in-flight lookahead fetches on deferred append, reset, and external abort", async () => {
+  const scenarios: Array<"deferred" | "reset" | "abort"> = ["deferred", "reset", "abort"];
+  for (const mode of scenarios) {
+    const signals = new Map<string, AbortSignal>();
+    const releasePrimary = { fn: null as (() => void) | null };
+    const http = {
+      once: async (url: string, init?: RequestInit) => {
+        if (init?.signal) signals.set(url, init.signal);
+        if (url === "/2") {
+          return new Promise<HttpExchange>((resolve) => {
+            init?.signal?.addEventListener("abort", () => resolve(encodedExchange("/2")), {
+              once: true,
+            });
+          });
+        }
+        return encodedExchange(url);
+      },
+    } as unknown as HttpClient;
+    const buffered: MediaBufferedRange[] = [];
+    const media = {
+      append: async (_kind: "audio" | "video", bytes: ArrayBuffer) => {
+        const url = new TextDecoder().decode(bytes);
+        if (url === "/0") return "appended" as const;
+        return new Promise<"appended" | "deferred">((resolve) => {
+          releasePrimary.fn = () => resolve(mode === "deferred" ? "deferred" : "appended");
+        });
+      },
+      bufferedRanges: () => buffered,
+    } as unknown as MediaSourceController;
+    const scheduler = new SegmentScheduler(
+      http,
+      media,
+      { emit: () => undefined } as EventEmitter,
+      1,
+    );
+    const segs = [
+      { url: "/0", startMs: 0, durationMs: 5_000 },
+      { url: "/1", startMs: 5_000, durationMs: 5_000 },
+      { url: "/2", startMs: 10_000, durationMs: 5_000 },
+    ];
+    await scheduler.fill(manifest([segs[0]]), 0, 5_000);
+    buffered.push({ kind: "audio", startMs: 0, endMs: 5_000 });
+
+    const external = new AbortController();
+    const fill = scheduler.fill(manifest(segs), 0, 15_000, external.signal);
+    await Bun.sleep(0);
+    expect(signals.get("/2")?.aborted).toBe(false);
+
+    if (mode === "deferred") {
+      releasePrimary.fn?.();
+      expect(await fill).toBe("deferred");
+    } else if (mode === "reset") {
+      scheduler.reset();
+      expect(signals.get("/2")?.aborted).toBe(true);
+      releasePrimary.fn?.();
+      await expect(fill).rejects.toHaveProperty("name", "AbortError");
+    } else {
+      external.abort();
+      expect(signals.get("/2")?.aborted).toBe(true);
+      releasePrimary.fn?.();
+      await expect(fill).rejects.toHaveProperty("name", "AbortError");
+    }
+    expect(signals.get("/2")?.aborted).toBe(true);
+  }
 });
