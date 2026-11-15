@@ -169,7 +169,11 @@ export class PlaybackClient {
       const response = await this.http.json(path, signal ? { ...init, signal } : init);
       return parsePlaybackWindow(response, this.http.absolute(path));
     } catch (error) {
-      if (error instanceof TypeTypeHttpError && isPlaybackSessionExpiryStatus(error.status)) {
+      if (
+        error instanceof TypeTypeHttpError &&
+        !(action === "window" && error.status === 404) &&
+        isPlaybackSessionExpiryStatus(error.status)
+      ) {
         throw playbackSessionExpiredError();
       }
       throw error;

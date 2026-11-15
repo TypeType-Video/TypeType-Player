@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { TypeTypeHttpError } from "../src/http-client";
 import type { PlaybackManifest } from "../src/manifest";
 import type { PlaybackWindow, PlaybackWindowRequest } from "../src/playback-window";
 import { type LoadedSession, refreshPlaybackWindow } from "../src/session-loader";
@@ -153,4 +154,174 @@ test("adopts the active generation returned by a stale position update", async (
 
   expect(requestGenerations).toEqual([7, 7]);
   expect(session.response.generation).toBe(7);
+});
+
+test("uses single-RTT window endpoint when provided and falls back on 400 or 404", async () => {
+  const calls: string[] = [];
+  const rtts: number[] = [];
+  const session: LoadedSession = {
+    response: {
+      sessionId: "session",
+      videoId: "video",
+      generation: 1,
+      ready: true,
+      retryAfterMs: null,
+    },
+    manifest,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+  };
+  const policy = {
+    bufferGoalMs: 10_000,
+    backBufferMs: 30_000,
+    pollIntervalMs: 500,
+    manifestRefreshMs: 8_000,
+    manifestPollLimit: 2,
+    segmentPollLimit: 2,
+  };
+  const readyWindow = (request: PlaybackWindowRequest, generation: number): PlaybackWindow => ({
+    sessionId: "session",
+    generation,
+    ready: true,
+    retryAfterMs: null,
+    terminalError: null,
+    recoveryAction: null,
+    retryVideoItags: [],
+    status: "ready",
+    blockedBy: null,
+    bufferedEdgeMs: 20_000,
+    manifest: { ...manifest, startTimeMs: request.playerTimeMs },
+  });
+
+  await refreshPlaybackWindow(
+    {
+      window: async (_id, request) => {
+        calls.push("window");
+        return readyWindow(request, 2);
+      },
+      position: async (_id, request) => {
+        calls.push("position");
+        return readyWindow(request, 2);
+      },
+      prefetch: async (_id, request) => {
+        calls.push("prefetch");
+        return readyWindow(request, 2);
+      },
+      segments: async (_id, request) => {
+        calls.push("segments");
+        return readyWindow(request, 2);
+      },
+    },
+    { bufferedRanges: () => [] },
+    session,
+    policy,
+    () => 5_000,
+    new AbortController().signal,
+    undefined,
+    undefined,
+    (rttMs) => rtts.push(rttMs),
+  );
+
+  expect(calls).toEqual(["window"]);
+  expect(session.response.generation).toBe(2);
+  expect(rtts).toHaveLength(1);
+
+  calls.length = 0;
+  await refreshPlaybackWindow(
+    {
+      window: async () => {
+        calls.push("window-400");
+        throw new TypeTypeHttpError("Invalid generation", 400);
+      },
+      position: async (_id, request) => {
+        calls.push("position");
+        return readyWindow(request, 3);
+      },
+      prefetch: async (_id, request) => {
+        calls.push("prefetch");
+        return readyWindow(request, 3);
+      },
+      segments: async (_id, request) => {
+        calls.push("segments");
+        return readyWindow(request, 3);
+      },
+    },
+    { bufferedRanges: () => [] },
+    session,
+    policy,
+    () => 8_000,
+    new AbortController().signal,
+  );
+
+  expect(calls).toEqual(["window-400", "position", "prefetch", "segments"]);
+  expect(session.response.generation).toBe(3);
+});
+
+test("preserves the playback receiver when invoking class-based window method", async () => {
+  class ReceiverPlayback {
+    private readonly suffix = ":bound";
+
+    async window(_sessionId: string, request: PlaybackWindowRequest): Promise<PlaybackWindow> {
+      return {
+        sessionId: `session${this.suffix}`,
+        generation: (request.generation ?? 0) + 1,
+        ready: true,
+        retryAfterMs: null,
+        terminalError: null,
+        recoveryAction: null,
+        retryVideoItags: [],
+        status: "ready",
+        blockedBy: null,
+        bufferedEdgeMs: 25_000,
+        manifest: { ...manifest, startTimeMs: request.playerTimeMs },
+      };
+    }
+
+    async position(): Promise<PlaybackWindow> {
+      throw new Error("position should not be called");
+    }
+
+    async prefetch(): Promise<PlaybackWindow> {
+      throw new Error("prefetch should not be called");
+    }
+
+    async segments(): Promise<PlaybackWindow> {
+      throw new Error("segments should not be called");
+    }
+  }
+
+  const session: LoadedSession = {
+    response: {
+      sessionId: "session:bound",
+      videoId: "video",
+      generation: 1,
+      ready: true,
+      retryAfterMs: null,
+    },
+    manifest,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+  };
+
+  await refreshPlaybackWindow(
+    new ReceiverPlayback(),
+    { bufferedRanges: () => [] },
+    session,
+    {
+      bufferGoalMs: 10_000,
+      backBufferMs: 30_000,
+      pollIntervalMs: 500,
+      manifestRefreshMs: 8_000,
+      manifestPollLimit: 2,
+      segmentPollLimit: 2,
+    },
+    () => 5_000,
+    new AbortController().signal,
+  );
+
+  expect(session.response.generation).toBe(2);
 });

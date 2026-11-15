@@ -12,7 +12,8 @@ export type PlaybackLoopFailureContext = {
 
 export type PlaybackLoopArgs = {
   video: { currentTime: number; paused: boolean; readyState: number };
-  playback: Pick<PlaybackClient, "position" | "prefetch" | "segments">;
+  playback: Pick<PlaybackClient, "position" | "prefetch" | "segments"> &
+    Partial<Pick<PlaybackClient, "window">>;
   media: Pick<MediaSourceController, "bufferedRanges" | "endOfStream" | "trim">;
   scheduler: Pick<SegmentScheduler, "fill">;
   emitter: Pick<EventEmitter, "emit">;

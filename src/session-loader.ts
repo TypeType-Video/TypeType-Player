@@ -1,4 +1,5 @@
 import type { BufferPolicy } from "./buffer-policy";
+import { TypeTypeHttpError } from "./http-client";
 import type { PlaybackManifest } from "./manifest";
 import { MediaSourceController } from "./media-source-controller";
 import type { PlaybackClient, PlaybackResponse } from "./playback-client";
@@ -23,8 +24,11 @@ export type LoadedSession = {
   audioOnly: boolean;
 };
 
+type PlaybackWindowClient = Pick<PlaybackClient, "position" | "prefetch" | "segments"> &
+  Partial<Pick<PlaybackClient, "window">>;
+
 type LoadSessionArgs = {
-  playback: Pick<PlaybackClient, "position" | "prefetch" | "segments">;
+  playback: PlaybackWindowClient;
   media: Pick<MediaSourceController, "attach" | "bufferedRanges">;
   scheduler: Pick<SegmentScheduler, "appendInit" | "reset">;
   video: { currentTime: number };
@@ -39,6 +43,7 @@ type LoadSessionArgs = {
   bufferGoalMs?: number;
   policy: BufferPolicy;
   signal: AbortSignal;
+  onControlRtt?: (rttMs: number) => void;
   beforeAttach?: () => Promise<void>;
   handoff?: (manifest: PlaybackManifest) => Promise<number>;
   keepBufferedMedia?: boolean;
@@ -105,7 +110,7 @@ function ensureNotAborted(signal: AbortSignal): void {
 }
 
 export async function refreshPlaybackWindow(
-  playback: Pick<PlaybackClient, "position" | "prefetch" | "segments">,
+  playback: PlaybackWindowClient,
   media: Pick<MediaSourceController, "bufferedRanges"> &
     Partial<Pick<MediaSourceController, "updateTiming">>,
   session: LoadedSession,
@@ -114,6 +119,7 @@ export async function refreshPlaybackWindow(
   signal: AbortSignal,
   playbackRate?: () => number,
   now?: () => number,
+  onControlRtt?: (rttMs: number) => void,
 ): Promise<void> {
   const sessionId = session.response.sessionId;
   const deadline = new StarvedWindowDeadline({
@@ -123,7 +129,7 @@ export async function refreshPlaybackWindow(
     ...(now ? { now } : {}),
   });
   const window = await pollSegments(
-    { playback, policy, signal },
+    { playback, policy, signal, ...(onControlRtt ? { onControlRtt } : {}) },
     sessionId,
     () => createPlaybackWindowRequest({ ...session, media, policy, playbackRate }, playerTimeMs()),
     (position) => {
@@ -145,7 +151,7 @@ export async function refreshPlaybackWindow(
 }
 
 async function waitForWindow(
-  args: Pick<LoadSessionArgs, "playback" | "policy" | "signal">,
+  args: Pick<LoadSessionArgs, "playback" | "policy" | "signal" | "onControlRtt">,
   sessionId: string,
   request: () => PlaybackWindowRequest,
   onPosition: (position: PlaybackWindow) => void,
@@ -153,8 +159,62 @@ async function waitForWindow(
   return pollSegments(args, sessionId, request, onPosition);
 }
 
+type PollRetryState = {
+  previousEdgeMs: number | null;
+  stagnantAttempts: number;
+};
+
 async function pollSegments(
-  args: Pick<LoadSessionArgs, "playback" | "policy" | "signal">,
+  args: Pick<LoadSessionArgs, "playback" | "policy" | "signal" | "onControlRtt">,
+  sessionId: string,
+  request: () => PlaybackWindowRequest,
+  onPosition: (position: PlaybackWindow) => void,
+  deadline?: StarvedWindowDeadline,
+) {
+  if (typeof args.playback.window === "function") {
+    try {
+      return await pollSingleWindow(args, sessionId, request, onPosition, deadline);
+    } catch (error) {
+      if (!isWindowFallbackError(error)) throw error;
+    }
+  }
+  return pollGranularWindow(args, sessionId, request, onPosition, deadline);
+}
+
+function isWindowFallbackError(error: unknown): boolean {
+  return (
+    error instanceof TypeTypeHttpError &&
+    (error.status === 400 || error.status === 404 || error.status === 405 || error.status === 501)
+  );
+}
+
+async function pollSingleWindow(
+  args: Pick<LoadSessionArgs, "playback" | "policy" | "signal" | "onControlRtt">,
+  sessionId: string,
+  request: () => PlaybackWindowRequest,
+  onPosition: (position: PlaybackWindow) => void,
+  deadline?: StarvedWindowDeadline,
+) {
+  const retry: PollRetryState = { previousEdgeMs: null, stagnantAttempts: 0 };
+  for (let attempt = 0; attempt < args.policy.manifestPollLimit; attempt += 1) {
+    ensureNotAborted(args.signal);
+    const startedAtMs = performance.now();
+    const rawWindow = await args.playback.window?.(sessionId, request(), args.signal);
+    if (!rawWindow) return pollGranularWindow(args, sessionId, request, onPosition, deadline);
+    const window = handleWindow(rawWindow);
+    ensureNotAborted(args.signal);
+    onPosition(window);
+    if (window.ready && window.manifest) {
+      args.onControlRtt?.(Math.max(0, Math.round(performance.now() - startedAtMs)));
+      return window;
+    }
+    await waitForNextWindowPoll(window, retry, deadline, args.signal);
+  }
+  throw new PlaybackWindowTimeoutError();
+}
+
+async function pollGranularWindow(
+  args: Pick<LoadSessionArgs, "playback" | "policy" | "signal" | "onControlRtt">,
   sessionId: string,
   request: () => PlaybackWindowRequest,
   onPosition: (position: PlaybackWindow) => void,
@@ -163,26 +223,37 @@ async function pollSegments(
   const position = handleWindow(await args.playback.position(sessionId, request(), args.signal));
   ensureNotAborted(args.signal);
   onPosition(position);
-  let previousEdgeMs: number | null = null;
-  let stagnantAttempts = 0;
+  const retry: PollRetryState = { previousEdgeMs: null, stagnantAttempts: 0 };
   for (let attempt = 0; attempt < args.policy.manifestPollLimit; attempt += 1) {
-    if (args.signal.aborted) throw new DOMException("Operation aborted", "AbortError");
+    ensureNotAborted(args.signal);
     const prefetch = handleWindow(await args.playback.prefetch(sessionId, request(), args.signal));
     if (!prefetch.ready) {
-      if (deadline?.expired(prefetch.bufferedEdgeMs)) throw new PlaybackWindowTimeoutError();
-      stagnantAttempts = prefetch.bufferedEdgeMs === previousEdgeMs ? stagnantAttempts + 1 : 0;
-      previousEdgeMs = prefetch.bufferedEdgeMs;
-      await retryDelay(prefetch.retryAfterMs, stagnantAttempts, args.signal);
+      await waitForNextWindowPoll(prefetch, retry, deadline, args.signal);
       continue;
     }
+    const startedAtMs = performance.now();
     const window = handleWindow(await args.playback.segments(sessionId, request(), args.signal));
-    if (window.ready && window.manifest) return window;
-    if (deadline?.expired(window.bufferedEdgeMs)) throw new PlaybackWindowTimeoutError();
-    stagnantAttempts = window.bufferedEdgeMs === previousEdgeMs ? stagnantAttempts + 1 : 0;
-    previousEdgeMs = window.bufferedEdgeMs;
-    await retryDelay(window.retryAfterMs, stagnantAttempts, args.signal);
+    ensureNotAborted(args.signal);
+    if (window.ready && window.manifest) {
+      args.onControlRtt?.(Math.max(0, Math.round(performance.now() - startedAtMs)));
+      return window;
+    }
+    await waitForNextWindowPoll(window, retry, deadline, args.signal);
   }
   throw new PlaybackWindowTimeoutError();
+}
+
+async function waitForNextWindowPoll(
+  window: PlaybackWindow,
+  retry: PollRetryState,
+  deadline: StarvedWindowDeadline | undefined,
+  signal: AbortSignal,
+): Promise<void> {
+  if (deadline?.expired(window.bufferedEdgeMs)) throw new PlaybackWindowTimeoutError();
+  retry.stagnantAttempts =
+    window.bufferedEdgeMs === retry.previousEdgeMs ? retry.stagnantAttempts + 1 : 0;
+  retry.previousEdgeMs = window.bufferedEdgeMs;
+  await retryDelay(window.retryAfterMs, retry.stagnantAttempts, signal);
 }
 
 function retryDelay(
