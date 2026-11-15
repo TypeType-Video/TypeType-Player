@@ -72,6 +72,7 @@ import type {
   private readonly sessionTransitions = new SessionTransitionQueue();
   private audioOnly: boolean;
   private recoveryPositionMs: number;
+  private preserveRecoveryPosition = false;
   private playbackLifecycleActive = true;
   private destroyed = false;
   private readonly seekStrategy: SeekStrategy;
@@ -111,6 +112,7 @@ import type {
         return false;
       },
       progress: (positionMs) => {
+        this.preserveRecoveryPosition = false;
         this.rememberRecoveryPosition(positionMs);
         this.playbackRecovery.observeProgress(positionMs);
         this.followLiveEdge(positionMs);
@@ -166,7 +168,7 @@ import type {
     const startTimeMs =
       this.pendingLoadSeekMs ?? Math.max(0, Math.round(this.config.startTimeMs ?? 0));
     this.pendingLoadSeekMs = null;
-    this.recoveryPositionMs = startTimeMs;
+    this.setPendingRecoveryPosition(startTimeMs);
     const response = await this.deps.playback.create(
       {
         videoId: this.config.videoId,
@@ -218,12 +220,13 @@ import type {
     this.bufferedSeekRecovery.cancel();
     this.playbackIntent.capture(this.video.paused, this.isTransitioning());
     this.liveEdgeFollower.observeUserSeek(targetMs, this.session?.manifest.live);
-    this.recoveryPositionMs = targetMs;
+    this.setPendingRecoveryPosition(targetMs);
     if (!this.isTransitioning() && canUseBufferedMediaSeek(this.video, targetMs)) {
       const completion = this.bufferedSeekRecovery.arm(
         this.video,
         targetMs,
         () => {
+          this.preserveRecoveryPosition = false;
           this.rememberRecoveryPosition(currentTimeMs(this.video));
           this.deps.loop.wake();
         },
@@ -260,7 +263,7 @@ import type {
   /** Applies the latest seek requested before the initial session became active. */
   private seekAfterLoad(targetMs: number): Promise<void> {
     this.pendingLoadSeekMs = targetMs;
-    this.recoveryPositionMs = targetMs;
+    this.setPendingRecoveryPosition(targetMs);
     const loadTask = this.loadTask;
     if (!loadTask) return Promise.resolve();
     return loadTask.then(
@@ -388,7 +391,7 @@ import type {
       this.playerState.set("seeking");
       this.emitter.emit({ type: "seek", positionMs: startMs });
       this.video.pause();
-      this.recoveryPositionMs = startMs;
+      this.setPendingRecoveryPosition(startMs);
       return startMs;
     };
     try {
@@ -412,7 +415,7 @@ import type {
     } catch (error) {
       if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
         if (isRecoverableSeekError(error)) {
-          this.handlePlaybackLoopError(
+          await this.handlePlaybackLoopError(
             error,
             { sessionId: current.response.sessionId, signal },
             currentTimeMs(this.video),
@@ -448,7 +451,7 @@ import type {
     if (userInitiated) this.resetPlaybackRecovery();
     const revision = this.operation.next();
     const signal = this.operation.signal;
-    this.recoveryPositionMs = targetMs;
+    this.setPendingRecoveryPosition(targetMs);
     if (isWebKitMediaElement(this.video)) this.deps.media.requireFreshAttachment();
     if (!quality) {
       this.deps.loop.stop();
@@ -478,7 +481,7 @@ import type {
     } catch (error) {
       if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
         if (isRecoverableSeekError(error)) {
-          this.handlePlaybackLoopError(
+          await this.handlePlaybackLoopError(
             error,
             { sessionId: current.response.sessionId, signal },
             targetMs,
@@ -592,6 +595,7 @@ import type {
       await waitForNativeSeek(this.video, signal);
       await this.playbackIntent.apply(this.video, signal);
       this.operation.ensureCurrent(this.destroyed, revision);
+      this.preserveRecoveryPosition = false;
       this.playbackRecovery.complete(currentTimeMs(this.video));
       this.liveEdgeFollower.initialize(currentTimeMs(this.video), session.manifest.live);
       if (this.playbackLifecycleActive) {
@@ -631,33 +635,35 @@ import type {
     error: Error,
     context: PlaybackLoopFailureContext,
     recoveryPositionMs?: number,
-  ): void {
-    if (this.destroyed || context.signal.aborted) return;
+  ): Promise<boolean> {
+    if (this.destroyed || context.signal.aborted) return Promise.resolve(false);
     const current = this.session;
     const sessionId = context.sessionId;
-    if (!current || sessionId === null || sessionId !== current.response.sessionId) return;
+    if (!current || sessionId === null || sessionId !== current.response.sessionId) {
+      return Promise.resolve(false);
+    }
     if (!isRecoverablePlaybackError(error)) {
       this.reportPlaybackFailure(error);
-      return;
+      return Promise.resolve(true);
     }
     if (recoveryPositionMs !== undefined) {
-      this.recoveryPositionMs = recoveryPositionMs;
-    } else if (!isRecoverableDecodeError(error)) {
+      this.setPendingRecoveryPosition(recoveryPositionMs);
+    } else if (!isRecoverableDecodeError(error) && !this.preserveRecoveryPosition) {
       this.rememberRecoveryPosition(currentTimeMs(this.video));
     }
     const positionMs = this.recoveryPositionMs;
     const decision = this.playbackRecovery.begin(sessionId);
-    if (decision === "ignore") return;
+    if (decision === "ignore") return Promise.resolve(false);
     if (decision === "exhausted") {
       this.reportPlaybackFailure(error);
-      return;
+      return Promise.resolve(true);
     }
     const revision = this.operation.next();
     const signal = this.operation.signal;
     this.bufferKeepingRevision = isRecoverableDecodeError(error) ? null : revision;
     this.deps.loop.stop();
     this.playerState.set("buffering");
-    void recoverPlaybackSession({
+    return recoverPlaybackSession({
       recovery: this.playbackRecovery,
       current,
       error,
@@ -692,7 +698,8 @@ import type {
       })
       .finally(() => {
         this.playbackRecovery.finish(sessionId);
-      });
+      })
+      .then(() => true);
   }
 
   /** Starts a new recovery episode for an explicit user operation. */
@@ -781,12 +788,20 @@ import type {
   /** Publishes one final playback failure and aborts pending media work. */
   private reportPlaybackFailure(error: Error): void {
     if (this.destroyed) return;
-    this.rememberRecoveryPosition(currentTimeMs(this.video));
+    if (!this.preserveRecoveryPosition) {
+      this.rememberRecoveryPosition(currentTimeMs(this.video));
+    }
     this.playbackRecovery.reportOnce(error, (failure) => {
       this.operation.abort();
       this.deps.loop.stop();
       this.playerState.fail(failure, this.recoveryPositionMs);
     });
+  }
+
+  /** Records an explicit seek/load position until media playback reaches it. */
+  private setPendingRecoveryPosition(positionMs: number): void {
+    this.recoveryPositionMs = Math.max(0, Math.round(positionMs));
+    this.preserveRecoveryPosition = true;
   }
 
   /** Keeps the last usable media position across source teardown. */
