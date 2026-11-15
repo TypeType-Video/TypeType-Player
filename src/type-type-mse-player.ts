@@ -413,19 +413,13 @@ import type {
         handoff,
       );
     } catch (error) {
-      if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
-        if (isRecoverableSeekError(error)) {
-          await this.handlePlaybackLoopError(
-            error,
-            { sessionId: current.response.sessionId, signal },
-            currentTimeMs(this.video),
-          );
-          return;
-        }
-        this.deps.loop.start();
-        this.playerState.set(this.video.paused ? "ready" : "playing");
-      }
-      throw error;
+      await this.handleSeekOperationFailure(
+        error,
+        current,
+        revision,
+        signal,
+        currentTimeMs(this.video),
+      );
     } finally {
       this.deps.scheduler.discardPrimed();
     }
@@ -479,20 +473,46 @@ import type {
       );
       if (quality) emitQuality(this.emitter, session);
     } catch (error) {
-      if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
-        if (isRecoverableSeekError(error)) {
-          await this.handlePlaybackLoopError(
-            error,
-            { sessionId: current.response.sessionId, signal },
-            targetMs,
-          );
-          return;
-        }
-        this.deps.loop.start();
-        this.playerState.set(this.video.paused ? "ready" : "playing");
-      }
-      throw error;
+      await this.handleSeekOperationFailure(error, current, revision, signal, targetMs);
     }
+  }
+
+  /** Recovers recoverable seek failures or restores session playback before rethrowing. */
+  private async handleSeekOperationFailure(
+    error: unknown,
+    current: LoadedSession,
+    revision: number,
+    signal: AbortSignal,
+    recoveryPositionMs: number,
+  ): Promise<void> {
+    if (!this.destroyed && this.operation.isCurrent(revision) && this.session === current) {
+      if (isRecoverableSeekError(error)) {
+        const handled = await this.handlePlaybackLoopError(
+          error,
+          { sessionId: current.response.sessionId, signal },
+          recoveryPositionMs,
+        );
+        if (
+          !handled &&
+          !this.destroyed &&
+          this.operation.isCurrent(revision) &&
+          this.session === current &&
+          !this.playbackRecovery.active
+        ) {
+          this.restoreUnrecoveredSessionPlayback();
+        }
+        return;
+      }
+      this.restoreUnrecoveredSessionPlayback();
+    }
+    throw error;
+  }
+
+  /** Restores loop scheduling and playback state after a failed transition stays on the session. */
+  private restoreUnrecoveredSessionPlayback(): void {
+    this.preserveRecoveryPosition = false;
+    this.deps.loop.start();
+    this.playerState.set(this.video.paused ? "ready" : "playing");
   }
 
   /** Loads and activates a replacement backend playback session. */

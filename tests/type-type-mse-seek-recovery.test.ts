@@ -183,6 +183,69 @@ function createHarness(args: {
   return { player, requests, failures, failurePositions, isLoopRunning: () => loopRunning };
 }
 
+test("keeps seek pending while a recoverable seek error recovers at the target position", async () => {
+  let releaseCreate: ((playback: PlaybackResponse) => void) | null = null;
+  const { player, requests, failures } = createHarness({
+    seek: async () => {
+      throw seekRecoveryError();
+    },
+    create: async () =>
+      new Promise<PlaybackResponse>((resolve) => {
+        releaseCreate = resolve;
+      }),
+  });
+
+  let settled = false;
+  const pendingSeek = player.seek(86_399).then(() => {
+    settled = true;
+  });
+  await Bun.sleep(0);
+
+  expect(settled).toBe(false);
+  expect(requests.map((request) => request.startTimeMs)).toEqual([86_399]);
+
+  if (!releaseCreate) throw new Error("Expected deferred recovery request");
+  releaseCreate(response("fresh-1"));
+  await pendingSeek;
+
+  expect(settled).toBe(true);
+  expect(player.session?.response.sessionId).toBe("fresh-1");
+  expect(failures).toEqual([]);
+});
+
+test("aborts pending seek recovery immediately when a newer seek supersedes it", async () => {
+  const seekTargets: number[] = [];
+  let abortedFirstRecovery = false;
+  const { player, failures } = createHarness({
+    seek: async (_sessionId, startTimeMs) => {
+      seekTargets.push(startTimeMs);
+      if (startTimeMs === 86_399) throw seekRecoveryError();
+      return response(`seek-${startTimeMs}`);
+    },
+    create: async (_request, signal) =>
+      new Promise<PlaybackResponse>((_resolve, reject) => {
+        signal?.addEventListener(
+          "abort",
+          () => {
+            abortedFirstRecovery = true;
+            reject(new DOMException("Operation aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      }),
+  });
+
+  const first = player.seek(86_399);
+  await Bun.sleep(0);
+  const second = player.seek(120_000);
+  await Promise.all([first, second]);
+
+  expect(abortedFirstRecovery).toBe(true);
+  expect(seekTargets).toEqual([86_399, 120_000]);
+  expect(player.session?.response.sessionId).toBe("seek-120000");
+  expect(failures).toEqual([]);
+});
+
 test("keeps the requested seek target instead of pre-seek currentTime when seek recovery exhausts", async () => {
   const { player, requests, failures, failurePositions } = createHarness({
     currentTime: 44.18,
@@ -199,4 +262,64 @@ test("keeps the requested seek target instead of pre-seek currentTime when seek 
   expect(requests.map((request) => request.startTimeMs)).toEqual([86_399, 86_399]);
   expect(failures).toHaveLength(1);
   expect(failurePositions).toEqual([86_399]);
+});
+
+test("preserves a 0ms seek target instead of reverting to pre-seek currentTime on failure", async () => {
+  const { player, failures, failurePositions } = createHarness({
+    currentTime: 44.18,
+    seek: async () => {
+      throw seekRecoveryError();
+    },
+    create: async () => {
+      throw seekRecoveryError();
+    },
+  });
+
+  await player.seek(0);
+
+  expect(failures).toHaveLength(1);
+  expect(failurePositions).toEqual([0]);
+});
+
+test("restores loop and playback state when a non-user seek hits ignored recovery", async () => {
+  const { player, failures, isLoopRunning } = createHarness({
+    seek: async () => {
+      throw seekRecoveryError();
+    },
+    create: async () => response("unused"),
+  });
+
+  expect(player.playbackRecovery.begin("source")).toBe("recover");
+  player.playbackRecovery.finish("source");
+
+  await player.performSeek(86_399, undefined, false, false);
+
+  expect(isLoopRunning()).toBe(true);
+  expect(player.playerState.value).toBe("ready");
+  expect(player.preserveRecoveryPosition).toBe(false);
+  expect(failures).toEqual([]);
+});
+
+test("clears preserveRecoveryPosition when a non-recoverable seek error stays on the current session", async () => {
+  const { player, failures, failurePositions, isLoopRunning } = createHarness({
+    currentTime: 44.18,
+    seek: async () => {
+      throw new Error("fatal seek failure");
+    },
+    create: async () => response("unused"),
+  });
+
+  await expect(player.seek(86_399)).rejects.toThrow("fatal seek failure");
+
+  expect(isLoopRunning()).toBe(true);
+  expect(player.playerState.value).toBe("ready");
+  expect(player.preserveRecoveryPosition).toBe(false);
+
+  await player.handlePlaybackLoopError(new Error("fatal loop error"), {
+    sessionId: "source",
+    signal: player.operation.signal,
+  });
+
+  expect(failures).toHaveLength(1);
+  expect(failurePositions).toEqual([44_180]);
 });
