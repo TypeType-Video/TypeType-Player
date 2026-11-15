@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
-import { TypeTypeHttpError } from "../src/http-client";
+import { type HttpClient, TypeTypeHttpError } from "../src/http-client";
 import type { PlaybackManifest } from "../src/manifest";
+import { PlaybackClient } from "../src/playback-client";
 import type { PlaybackWindow, PlaybackWindowRequest } from "../src/playback-window";
+import { PlaybackWindowRecoveryError } from "../src/playback-window-error";
+import { RequestStallError } from "../src/request-watchdog";
 import { type LoadedSession, refreshPlaybackWindow } from "../src/session-loader";
 
 const manifest: PlaybackManifest = {
@@ -324,4 +327,144 @@ test("preserves the playback receiver when invoking class-based window method", 
   );
 
   expect(session.response.generation).toBe(2);
+});
+
+test("falls back from PlaybackClient 404 on /window and preserves 410 or non-fallback errors", async () => {
+  const mkWindow = (generation: number, startTimeMs: number) => ({
+    sessionId: "session",
+    generation,
+    ready: true,
+    retryAfterMs: null,
+    terminalError: null,
+    recoveryAction: null,
+    retryVideoItags: [],
+    status: "ready",
+    blockedBy: null,
+    bufferedEdgeMs: 25_000,
+    manifest: { ...manifest, startTimeMs },
+  });
+  const policy = {
+    bufferGoalMs: 10_000,
+    backBufferMs: 30_000,
+    pollIntervalMs: 500,
+    manifestRefreshMs: 8_000,
+    manifestPollLimit: 2,
+    segmentPollLimit: 2,
+  };
+  const mkSession = (): LoadedSession => ({
+    response: {
+      sessionId: "session",
+      videoId: "video",
+      generation: 1,
+      ready: true,
+      retryAfterMs: null,
+    },
+    manifest,
+    videoItag: 137,
+    audioItag: 140,
+    audioTrackId: null,
+    audioOnly: false,
+  });
+
+  // Real PlaybackClient integration: HTTP 404 on /window falls back to granular endpoints
+  const clientPaths: string[] = [];
+  const playbackClient = new PlaybackClient({
+    json: async (path: string) => {
+      clientPaths.push(path);
+      if (path.endsWith("/window")) throw new TypeTypeHttpError("Not Found", 404);
+      return mkWindow(4, 6_000);
+    },
+    absolute: (path: string) => `https://example.test${path}`,
+  } as unknown as HttpClient);
+  const clientSession = mkSession();
+  await refreshPlaybackWindow(
+    playbackClient,
+    { bufferedRanges: () => [] },
+    clientSession,
+    policy,
+    () => 6_000,
+    new AbortController().signal,
+  );
+  expect(clientPaths).toEqual([
+    "/sabr/playback/session/window",
+    "/sabr/playback/session/position",
+    "/sabr/playback/session/prefetch",
+    "/sabr/playback/session/segments",
+  ]);
+  expect(clientSession.response.generation).toBe(4);
+
+  // HTTP 410 on /window still fails fast as session expiry
+  const goneClient = new PlaybackClient({
+    json: async () => {
+      throw new TypeTypeHttpError("Gone", 410);
+    },
+    absolute: (path: string) => `https://example.test${path}`,
+  } as unknown as HttpClient);
+  await expect(
+    refreshPlaybackWindow(
+      goneClient,
+      { bufferedRanges: () => [] },
+      mkSession(),
+      policy,
+      () => 0,
+      new AbortController().signal,
+    ),
+  ).rejects.toBeInstanceOf(PlaybackWindowRecoveryError);
+
+  // Fallback status matrix (404, 405, 501) vs non-fallback errors (401, 500, AbortError, RequestStallError)
+  for (const status of [404, 405, 501]) {
+    const seen: string[] = [];
+    const granular = (name: string) => async (_id: string, req: PlaybackWindowRequest) => {
+      seen.push(name);
+      return mkWindow(2, req.playerTimeMs);
+    };
+    await refreshPlaybackWindow(
+      {
+        window: async () => {
+          seen.push("window");
+          throw new TypeTypeHttpError(`HTTP ${status}`, status);
+        },
+        position: granular("position"),
+        prefetch: granular("prefetch"),
+        segments: granular("segments"),
+      },
+      { bufferedRanges: () => [] },
+      mkSession(),
+      policy,
+      () => 0,
+      new AbortController().signal,
+    );
+    expect(seen).toEqual(["window", "position", "prefetch", "segments"]);
+  }
+
+  for (const failure of [
+    new TypeTypeHttpError("Unauthorized", 401),
+    new TypeTypeHttpError("Internal Server Error", 500),
+    new DOMException("Aborted", "AbortError"),
+    new RequestStallError(),
+  ]) {
+    let granularCalls = 0;
+    const failGranular = async (_id: string, req: PlaybackWindowRequest) => {
+      granularCalls += 1;
+      return mkWindow(2, req.playerTimeMs);
+    };
+    await expect(
+      refreshPlaybackWindow(
+        {
+          window: async () => {
+            throw failure;
+          },
+          position: failGranular,
+          prefetch: failGranular,
+          segments: failGranular,
+        },
+        { bufferedRanges: () => [] },
+        mkSession(),
+        policy,
+        () => 0,
+        new AbortController().signal,
+      ),
+    ).rejects.toBe(failure);
+    expect(granularCalls).toBe(0);
+  }
 });
