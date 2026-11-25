@@ -50,9 +50,11 @@ export async function loadPlaybackSession(args: LoadSessionArgs): Promise<Loaded
     bufferedRanges: [],
   });
   const sessionId = args.response.sessionId;
-  const window = await waitForWindow(args, sessionId, request, (position) => {
-    args.response = updateGenerationFromPosition(args.response, sessionId, position);
-  });
+  const window =
+    (args.response.ready ? await readyWindow(args, sessionId, request) : null) ??
+    (await waitForWindow(args, sessionId, request, (position) => {
+      args.response = updateGenerationFromPosition(args.response, sessionId, position);
+    }));
   if (!window.manifest) throw new Error("Playback window is not ready");
   const resolvedStartTimeMs =
     window.startTimeMs ?? window.manifest.startTimeMs ?? requestedStartTimeMs(args);
@@ -142,6 +144,18 @@ export async function refreshPlaybackWindow(
   session.response = { ...session.response, generation: window.generation, startTimeMs, live };
   session.manifest = { ...window.manifest, startTimeMs, live };
   media.updateTiming?.(session.manifest);
+}
+
+// A session the server answered ready already holds the start of the media: its window is asked for at once, without
+// the position and prefetch round trips that only wait for that state.
+async function readyWindow(
+  args: Pick<LoadSessionArgs, "playback" | "signal">,
+  sessionId: string,
+  request: () => PlaybackWindowRequest,
+) {
+  const window = handleWindow(await args.playback.segments(sessionId, request(), args.signal));
+  ensureNotAborted(args.signal);
+  return window.ready && window.manifest ? window : null;
 }
 
 async function waitForWindow(
