@@ -4,6 +4,7 @@ import {
   RequestWatchdog,
   type RequestWatchdogTiming,
   readWatchedBody,
+  streamWatchedBody,
 } from "./request-watchdog";
 import { parseRetryAfterMs, RetryBudget } from "./retry-backoff";
 import { type RetryTiming, SYSTEM_RETRY_TIMING } from "./retry-timing";
@@ -57,8 +58,16 @@ export class HttpClient {
     return JSON.parse(new TextDecoder().decode(exchange.body));
   }
 
-  once(url: string, init?: RequestInit): Promise<HttpExchange> {
-    return this.exchange(url, init, this.mediaWatchdog);
+  /**
+   * One media request. With onChunk, a 200 body goes to onChunk part by part as it arrives instead of being
+   * collected, and the exchange carries an empty body.
+   */
+  once(
+    url: string,
+    init?: RequestInit,
+    onChunk?: (chunk: ArrayBuffer) => Promise<void>,
+  ): Promise<HttpExchange> {
+    return this.exchange(url, init, this.mediaWatchdog, onChunk);
   }
 
   absolute(path: string): string {
@@ -101,9 +110,10 @@ export class HttpClient {
     url: string,
     init: RequestInit | undefined,
     timing: RequestWatchdogTiming,
+    onChunk?: (chunk: ArrayBuffer) => Promise<void>,
   ): Promise<HttpExchange> {
     const attemptHeaders = this.buildHeaders(init?.headers);
-    const result = await this.performExchange(url, init, attemptHeaders, timing);
+    const result = await this.performExchange(url, init, attemptHeaders, timing, onChunk);
     if (result.status !== 401 || !this.options.onUnauthorized || init?.signal?.aborted) {
       return result;
     }
@@ -117,7 +127,7 @@ export class HttpClient {
     if (shouldRetry === false || init?.signal?.aborted) {
       return result;
     }
-    return this.performExchange(url, init, this.buildHeaders(init?.headers), timing);
+    return this.performExchange(url, init, this.buildHeaders(init?.headers), timing, onChunk);
   }
 
   private async performExchange(
@@ -125,6 +135,7 @@ export class HttpClient {
     init: RequestInit | undefined,
     headers: Headers,
     timing: RequestWatchdogTiming,
+    onChunk?: (chunk: ArrayBuffer) => Promise<void>,
   ): Promise<HttpExchange> {
     const watchdog = new RequestWatchdog(init?.signal, timing);
     try {
@@ -132,7 +143,13 @@ export class HttpClient {
         fetch(url, { ...init, headers, cache: init?.cache ?? "no-store", signal: watchdog.signal }),
       );
       watchdog.progress();
-      const body = await readWatchedBody(response, watchdog);
+      let body: ArrayBuffer;
+      if (onChunk && response.status === 200) {
+        await streamWatchedBody(response, watchdog, onChunk);
+        body = new ArrayBuffer(0);
+      } else {
+        body = await readWatchedBody(response, watchdog);
+      }
       return {
         status: response.status,
         statusText: response.statusText,

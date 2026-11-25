@@ -80,6 +80,7 @@ test("stops filling a track and refetches a deferred segment later", async () =>
       return "deferred" as const;
     },
     bufferedRanges: () => [],
+    resetParser: async () => undefined,
   };
   const scheduler = new SegmentScheduler(http, media, { emit: () => undefined } as EventEmitter, 1);
 

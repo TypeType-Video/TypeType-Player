@@ -140,6 +140,12 @@ export class MediaSourceController {
     }
   }
 
+  /** Drops what a partly appended media segment left in the parser of that track. */
+  async resetParser(kind: TrackKind): Promise<void> {
+    const queue = kind === "audio" ? this.audioQueue : this.videoQueue;
+    await queue?.resetParser();
+  }
+
   async trim(currentTimeMs: number, backBufferMs: number): Promise<void> {
     const removeEnd = Math.max(0, currentTimeMs - backBufferMs) / 1000;
     await Promise.all([

@@ -1,8 +1,12 @@
 import type { EventEmitter } from "./event-emitter";
 import type { HttpClient } from "./http-client";
 import type { ManifestSegment, PlaybackManifest } from "./manifest";
-import type { MediaBufferedRange, MediaSourceController } from "./media-source-controller";
-import { fetchSegmentBytes } from "./segment-fetcher";
+import type {
+  AppendResult,
+  MediaBufferedRange,
+  MediaSourceController,
+} from "./media-source-controller";
+import { fetchSegmentBytes, PartialSegmentError } from "./segment-fetcher";
 import type { TrackKind } from "./types";
 
 const BUFFERED_RANGE_TOLERANCE_MS = 50;
@@ -18,7 +22,10 @@ export class SegmentScheduler {
 
   constructor(
     private readonly http: HttpClient,
-    private readonly media: Pick<MediaSourceController, "append" | "bufferedRanges">,
+    private readonly media: Pick<
+      MediaSourceController,
+      "append" | "bufferedRanges" | "resetParser"
+    >,
     private readonly emitter: EventEmitter,
     private readonly pollLimit: number,
   ) {}
@@ -143,14 +150,62 @@ export class SegmentScheduler {
       }
       this.appended.delete(key);
     }
-    const bytes = await this.segmentBytes(url, signal);
-    this.ensureActive(revision, signal);
-    const result = await this.media.append(kind, bytes);
+    const result =
+      durationMs > 0 && !this.primed.has(url)
+        ? await this.streamAppend(kind, url, revision, signal)
+        : await this.wholeAppend(kind, url, revision, signal);
     this.ensureActive(revision, signal);
     if (result === "deferred") return false;
     this.appended.add(key);
     this.emitter.emit({ type: "segment", kind, url, startMs, durationMs });
     return true;
+  }
+
+  private async wholeAppend(
+    kind: TrackKind,
+    url: string,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<AppendResult> {
+    const bytes = await this.segmentBytes(url, signal);
+    this.ensureActive(revision, signal);
+    return this.media.append(kind, bytes);
+  }
+
+  /**
+   * Appends a media segment part by part as the server relays it from YouTube, so its first frames decode before
+   * its end. A response that stops part way, or a full buffer, leaves half a segment in the parser: it is reset,
+   * then the segment comes whole the usual way (or waits, when the buffer is full).
+   */
+  private async streamAppend(
+    kind: TrackKind,
+    url: string,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<AppendResult> {
+    let deferred = false;
+    try {
+      await fetchSegmentBytes(
+        this.http,
+        url,
+        this.pollLimit,
+        signal,
+        this.http.retryTiming,
+        async (chunk) => {
+          this.ensureActive(revision, signal);
+          if ((await this.media.append(kind, chunk)) === "deferred") {
+            deferred = true;
+            throw new Error("SourceBuffer full");
+          }
+        },
+      );
+      return "appended";
+    } catch (error) {
+      if (!(error instanceof PartialSegmentError)) throw error;
+      await this.media.resetParser(kind);
+      this.ensureActive(revision, signal);
+      return deferred ? "deferred" : this.wholeAppend(kind, url, revision, signal);
+    }
   }
 
   private async segmentBytes(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {

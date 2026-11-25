@@ -1,5 +1,5 @@
 type QueueItem = {
-  kind: "append" | "remove";
+  kind: "append" | "remove" | "parser";
   action: () => void;
   resolve: () => void;
   reject: (error: Error) => void;
@@ -38,6 +38,18 @@ export class AppendQueue {
         resolve,
         reject,
       });
+      this.drain();
+    });
+  }
+
+  /**
+   * Forgets a media segment appended only in part, once the appends before it are done, so the next append starts
+   * a segment from its beginning (SourceBuffer.abort resets the parser and fires no event when idle).
+   */
+  resetParser(): Promise<void> {
+    if (this.disposed) return Promise.reject(new Error("Append queue is disposed"));
+    return new Promise((resolve, reject) => {
+      this.queue.push({ kind: "parser", action: () => this.sourceBuffer.abort(), resolve, reject });
       this.drain();
     });
   }
@@ -96,6 +108,11 @@ export class AppendQueue {
     this.current = item;
     try {
       item.action();
+      if (item.kind === "parser") {
+        this.current = null;
+        item.resolve();
+        this.drain();
+      }
     } catch (error) {
       item.reject(error instanceof Error ? error : new Error("SourceBuffer append failed"));
       this.current = null;

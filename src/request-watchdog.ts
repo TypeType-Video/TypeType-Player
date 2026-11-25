@@ -107,6 +107,31 @@ export async function readWatchedBody(
   return concatChunks(chunks, length);
 }
 
+/** Hands each part of a body to onChunk as it arrives, under the same stall watchdog as a whole read. */
+export async function streamWatchedBody(
+  response: Response,
+  watchdog: RequestWatchdog,
+  onChunk: (chunk: ArrayBuffer) => Promise<void>,
+): Promise<void> {
+  const body = response.body;
+  if (!body) {
+    await onChunk(await watchdog.run(response.arrayBuffer()));
+    return;
+  }
+  const reader = body.getReader();
+  try {
+    while (true) {
+      const chunk = await watchdog.run(reader.read());
+      if (chunk.done) return;
+      watchdog.progress();
+      await onChunk(chunk.value.slice().buffer);
+    }
+  } catch (error) {
+    void reader.cancel().catch(() => undefined);
+    throw error;
+  }
+}
+
 function concatChunks(chunks: Uint8Array[], length: number): ArrayBuffer {
   const bytes = new Uint8Array(length);
   let offset = 0;
