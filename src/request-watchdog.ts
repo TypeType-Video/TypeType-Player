@@ -107,7 +107,11 @@ export async function readWatchedBody(
   return concatChunks(chunks, length);
 }
 
-/** Hands each part of a body to onChunk as it arrives, under the same stall watchdog as a whole read. */
+/**
+ * Hands a body to onChunk as it arrives, under the same stall watchdog as a whole read. Parts that arrive while
+ * onChunk is still busy are joined and handed over together once it returns: the first bytes go out at once, and a
+ * body that is already there goes out in one or two calls instead of one per network chunk.
+ */
 export async function streamWatchedBody(
   response: Response,
   watchdog: RequestWatchdog,
@@ -119,13 +123,37 @@ export async function streamWatchedBody(
     return;
   }
   const reader = body.getReader();
+  const waiting: Uint8Array[] = [];
+  let failure: unknown = null;
+  let draining: Promise<void> | null = null;
+  const drain = async () => {
+    try {
+      while (waiting.length > 0) {
+        const parts = waiting.splice(0);
+        await onChunk(
+          concatChunks(
+            parts,
+            parts.reduce((total, part) => total + part.byteLength, 0),
+          ),
+        );
+      }
+    } catch (error) {
+      failure ??= error;
+    } finally {
+      draining = null;
+    }
+  };
   try {
     while (true) {
+      if (failure) throw failure;
       const chunk = await watchdog.run(reader.read());
-      if (chunk.done) return;
+      if (chunk.done) break;
       watchdog.progress();
-      await onChunk(chunk.value.slice().buffer);
+      waiting.push(chunk.value);
+      draining ??= drain();
     }
+    while (draining) await draining;
+    if (failure) throw failure;
   } catch (error) {
     void reader.cancel().catch(() => undefined);
     throw error;
