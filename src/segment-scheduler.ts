@@ -18,6 +18,7 @@ export class SegmentScheduler {
   private readonly appended = new Set<string>();
   private readonly primed = new Map<string, Promise<ArrayBuffer>>();
   private readonly recheckAttempts = new Map<string, number>();
+  private readonly appending = new Map<string, Promise<boolean>>();
   private revision = 0;
 
   constructor(
@@ -34,6 +35,7 @@ export class SegmentScheduler {
     this.revision += 1;
     this.appended.clear();
     this.recheckAttempts.clear();
+    this.appending.clear();
   }
 
   /** Starts downloading the first media of a session that is not attached yet. */
@@ -127,7 +129,31 @@ export class SegmentScheduler {
     return "filled";
   }
 
+  /**
+   * Appends one init or segment once. A fill that reaches a segment another fill is still appending (the startup fill
+   * goes on after playback starts) waits for it instead of appending it a second time; each track keeps its order.
+   */
   private async appendUrl(
+    kind: TrackKind,
+    url: string,
+    startMs: number,
+    durationMs: number,
+    revision: number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const key = `${kind}:${url}`;
+    const running = this.appending.get(key);
+    if (running) return running;
+    const task = this.appendUrlOnce(kind, url, startMs, durationMs, revision, signal);
+    this.appending.set(key, task);
+    try {
+      return await task;
+    } finally {
+      if (this.appending.get(key) === task) this.appending.delete(key);
+    }
+  }
+
+  private async appendUrlOnce(
     kind: TrackKind,
     url: string,
     startMs: number,

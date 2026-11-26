@@ -1,5 +1,6 @@
 import { decodeStartMs } from "./decode-preroll";
 import type { PlaybackManifest } from "./manifest";
+import { bufferedEndAtCurrentTrackRanges } from "./media-buffer";
 import { rateAwareBufferGoalMs } from "./playback-rate";
 import type { PlayerDeps } from "./player-deps";
 import type { PlaybackRecovery } from "./player-recovery";
@@ -11,6 +12,10 @@ import {
 import type { TypeTypeMseConfig, TypeTypeMseQuality } from "./types";
 
 const STARTUP_BUFFER_MS = 2_500;
+// Playback starts once this much is buffered after the start on every track, while the rest of the startup fill
+// keeps coming: YouTube can take seconds to send a first segment whose first part already plays.
+const PLAYABLE_START_MS = 1_000;
+const PLAYABLE_POLL_MS = 25;
 
 type Args = {
   deps: PlayerSessionDeps;
@@ -110,18 +115,52 @@ async function loadSelectedSession(
     session.response.startTimeMs ?? session.manifest.startTimeMs ?? requestedStartTimeMs;
   const fillStartMs = decodeStartMs(session.manifest, startTimeMs);
   const playbackRate = args.deps.playbackRate?.() ?? 1;
-  await args.deps.scheduler.fill(
+  await fillUntilPlayable(
+    args,
     session.manifest,
     fillStartMs,
+    startTimeMs,
     startTimeMs +
       Math.min(
         rateAwareBufferGoalMs(startupBufferMs(args), playbackRate),
         rateAwareBufferGoalMs(args.deps.policy.bufferGoalMs, playbackRate),
       ),
-    args.signal,
   );
   if (args.signal.aborted) throw new DOMException("Operation aborted", "AbortError");
   return session;
+}
+
+/**
+ * Runs the startup fill and returns when it ends or as soon as every track holds PLAYABLE_START_MS after the start,
+ * whichever comes first. A fill still running goes on: the playback loop asks for the same segments and joins it,
+ * so its failures come back through the loop.
+ */
+async function fillUntilPlayable(
+  args: Args,
+  manifest: PlaybackManifest,
+  fillStartMs: number,
+  startTimeMs: number,
+  goalMs: number,
+): Promise<void> {
+  let settled = false;
+  const fill = args.deps.scheduler.fill(manifest, fillStartMs, goalMs, args.signal).finally(() => {
+    settled = true;
+  });
+  const playableEndMs = Math.min(goalMs, startTimeMs + PLAYABLE_START_MS);
+  const playable = async () => {
+    while (!settled && !args.signal.aborted) {
+      const ranges = args.deps.media.bufferedRanges();
+      if (
+        bufferedEndAtCurrentTrackRanges(ranges, startTimeMs, manifest.video !== null) >=
+        playableEndMs
+      )
+        return;
+      await new Promise((resolve) => setTimeout(resolve, PLAYABLE_POLL_MS));
+    }
+    await fill;
+  };
+  await Promise.race([fill, playable()]);
+  fill.catch(() => undefined);
 }
 
 function startupBufferMs(args: Args): number {
